@@ -1,0 +1,2687 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Muros y Techos · Visualizador de Avance de Obra</title>
+
+  <!-- Tema guardado (antes de pintar, para evitar parpadeo) -->
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("ui_theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") {
+        t = (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+
+  <!-- APS Viewer v7 -->
+  <link rel="stylesheet"
+        href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css"
+        type="text/css" />
+  <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+  <!-- Parser de Excel (XLSX) en el navegador -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================================
+       TOKENS
+       ============================================================ */
+    :root {
+      --ink: #1c1c1a;                 /* barra superior (tinta Muros y Techos) */
+      --brand: #a02326;               /* rojo corporativo — acción principal */
+      --brand-hover: #b92b2f;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --r: 10px;
+      --r-sm: 7px;
+      --st-vac: #1fa35a;              /* verde «Vaciado» (medidores) */
+      --nav-w: 340px;
+      --dock-w: 384px;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #141413;
+      --surface: #1e1e1c;
+      --surface-2: #272725;
+      --surface-3: #32322f;
+      --border: #3a3a36;
+      --border-soft: #2c2c29;
+      --text: #f1f0ec;
+      --muted: #a8a59c;
+      --faint: #7d7a72;
+      --accent: #4cb4ee;
+      --ok: #4ccb7b;
+      --danger: #f07a7a;
+      --danger-bg: rgba(240, 122, 122, .12);
+      --brand-soft: rgba(191, 43, 47, .2);
+      --grid: rgba(255, 255, 255, .035);
+      --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f3f2ee;
+      --surface: #ffffff;
+      --surface-2: #f5f4f0;
+      --surface-3: #eae8e2;
+      --border: #d9d6ce;
+      --border-soft: #e7e5de;
+      --text: #1f1f1d;
+      --muted: #625f58;
+      --faint: #8b887f;
+      --accent: #0a6fa8;
+      --ok: #18794a;
+      --danger: #b3261e;
+      --danger-bg: rgba(179, 38, 30, .08);
+      --brand-soft: rgba(160, 35, 38, .1);
+      --grid: rgba(0, 0, 0, .045);
+      --shadow: 0 10px 30px rgba(30, 30, 28, .16);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--font); font-size: 13px; line-height: 1.45;
+      background: var(--bg); color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .icon {
+      width: 16px; height: 16px; flex: 0 0 16px; display: block;
+      stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+    }
+    .app :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ============================================================
+       BOTONES Y CAMPOS
+       ============================================================ */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid transparent;
+      font: 600 13px/1 var(--font); white-space: nowrap; cursor: pointer;
+      background: var(--brand); color: #fff;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn:hover { background: var(--brand-hover); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn.ghost { background: transparent; border-color: var(--border); color: var(--text); }
+    .btn.ghost:hover { background: var(--surface-2); }
+    .btn.block { width: 100%; }
+    .btn.sm { height: 30px; padding: 0 11px; font-size: 12px; }
+    .icon-btn {
+      width: 34px; height: 34px; flex: 0 0 34px; display: inline-grid; place-items: center;
+      border-radius: 8px; border: 1px solid transparent; background: transparent;
+      color: var(--muted); cursor: pointer; transition: background .15s, color .15s;
+    }
+    .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+    .input, .select {
+      width: 100%; height: 36px; padding: 0 10px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); font: 400 12.5px var(--font);
+    }
+    .input::placeholder { color: var(--faint); }
+    .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .input.mono { font-family: var(--mono); font-size: 11.5px; }
+    .field-label { display: block; font-size: 11.5px; font-weight: 500; color: var(--muted); margin: 12px 0 5px; }
+    .hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 8px 0 0; }
+    .link { color: var(--accent); text-decoration: none; cursor: pointer; }
+    .link:hover { text-decoration: underline; }
+
+    /* ============================================================
+       BARRA SUPERIOR (siempre en tinta, en ambos temas)
+       ============================================================ */
+    .topbar {
+      --text: #f1f0ec; --muted: #a8a59c; --border: #3d3d39; --surface-2: #2b2b28; --ok: #4ccb7b;
+      flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+      height: 54px; padding: 0 14px 0 10px;
+      background: var(--ink); color: var(--text);
+      border-top: 3px solid var(--brand);          /* franja corporativa */
+    }
+    .topbar > * { flex: 0 0 auto; }
+    .topbar .brand { display: flex; align-items: center; text-decoration: none; }
+    .topbar .brand img { height: 34px; width: auto; display: block; }
+    .topbar .brand-fallback { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: .2px; }
+    .topbar .sep { width: 1px; height: 24px; background: var(--border); }
+    .topbar .titles { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+    .topbar h1 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; letter-spacing: .1px; }
+    .topbar .crumb {
+      font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .topbar .crumb::before { content: "/"; margin-right: 10px; color: var(--border); }
+    .topbar .spacer { flex: 1 1 auto; min-width: 4px; }
+    .tools { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
+    .tool {
+      display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px;
+      border: none; border-radius: 7px; background: transparent; color: var(--muted);
+      font: 600 12.5px/1 var(--font); cursor: pointer; transition: background .15s, color .15s;
+    }
+    .tool:hover { color: var(--text); }
+    .tool.active { background: var(--brand); color: #fff; }
+    .conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+    .conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #6f6c65; }
+    .conn.ok { color: var(--text); }
+    .conn.ok::before { background: var(--ok); box-shadow: 0 0 0 3px rgba(76, 203, 123, .2); }
+
+    /* ============================================================
+       ESTRUCTURA
+       ============================================================ */
+    .main { display: flex; flex: 1; min-height: 0; position: relative; }
+
+    /* ---- Panel izquierdo: asistente ---- */
+    .sidebar {
+      width: var(--nav-w); flex: 0 0 var(--nav-w); background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; min-height: 0; overflow: auto;
+      transition: margin-left .22s ease;
+    }
+    .app.nav-closed .sidebar { margin-left: calc(var(--nav-w) * -1); }
+    .side-head { padding: 20px 20px 4px; }
+    .side-head .kicker { font-size: 11px; font-weight: 600; letter-spacing: .7px; text-transform: uppercase; color: var(--faint); }
+    .side-head h2 { margin: 4px 0 0; font-size: 17px; font-weight: 650; letter-spacing: -.1px; }
+    .steps { padding: 18px 20px 4px; }
+    .step { position: relative; padding: 2px 0 24px 42px; opacity: .45; pointer-events: none; transition: opacity .2s; }
+    .step.active, .step.done { opacity: 1; pointer-events: auto; }
+    .step::before {                                 /* conector vertical */
+      content: ""; position: absolute; left: 13px; top: 34px; bottom: 4px; width: 2px;
+      border-radius: 2px; background: var(--border);
+    }
+    .step:last-child::before { display: none; }
+    .step.done::before { background: var(--ok); opacity: .55; }
+    .step .badge {
+      position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 13px; font-weight: 700;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+    }
+    .step.active .badge { background: var(--brand); border-color: var(--brand); color: #fff; box-shadow: 0 0 0 4px var(--brand-soft); }
+    .step.done .badge { background: var(--ok); border-color: var(--ok); color: #fff; }
+    :root[data-theme="dark"] .step.done .badge { color: #0c2a16; }
+    .step .badge .icon { width: 14px; height: 14px; flex-basis: 14px; stroke-width: 2.6; }
+    .step-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 28px; }
+    .step-sub { margin: 2px 0 12px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+    .ok-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+    .ok-line .icon { color: var(--ok); }
+    .selnote { display: none; align-items: flex-start; gap: 7px; margin-top: 9px; font-size: 12.5px; color: var(--text); }
+    .selnote .icon { color: var(--ok); margin-top: 1px; }
+    .note {
+      margin: 10px 0 0; padding: 9px 11px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+      background: var(--surface-2); border: 1px solid var(--border-soft); color: var(--muted);
+    }
+    .note b { color: var(--text); font-weight: 600; }
+    .paste { margin-top: 12px; padding: 12px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--border); }
+    .paste ol { margin: 0 0 10px; padding-left: 18px; font-size: 12px; line-height: 1.55; color: var(--muted); }
+    .paste ol li + li { margin-top: 5px; }
+    .paste .btn { margin-top: 8px; }
+
+    /* ---- Árbol de proyectos (opcional) ---- */
+    .tree-wrap { margin-top: 12px; }
+    .tree-wrap > summary {
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+      font-size: 12.5px; font-weight: 500; color: var(--accent); user-select: none; padding: 3px 0;
+    }
+    .tree-wrap > summary::-webkit-details-marker { display: none; }
+    .tree-wrap > summary .icon { width: 13px; height: 13px; flex-basis: 13px; transition: transform .15s; }
+    .tree-wrap[open] > summary .icon { transform: rotate(90deg); }
+    #tree {
+      max-height: 300px; overflow: auto; margin-top: 8px; padding: 6px;
+      border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2);
+    }
+    #tree:empty { display: none; }
+    .node {
+      display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px;
+      cursor: pointer; white-space: nowrap; font-size: 12.5px;
+    }
+    .node:hover { background: var(--surface-3); }
+    .node .twisty { width: 12px; flex: 0 0 12px; color: var(--faint); display: grid; place-items: center; }
+    .node .twisty .icon { width: 12px; height: 12px; flex-basis: 12px; transition: transform .15s; }
+    .node.loaded > .twisty .icon { transform: rotate(90deg); }
+    .node .ico { color: var(--muted); flex: 0 0 16px; }
+    .node .lbl { overflow: hidden; text-overflow: ellipsis; }
+    .node.file.active { background: var(--brand-soft); font-weight: 600; }
+    .node.file.active .ico { color: var(--brand); }
+    .children { display: none; margin-left: 14px; padding-left: 6px; border-left: 1px solid var(--border); }
+    .children.open { display: block; }
+    .spin { color: var(--muted); font-size: 12px; padding: 5px 8px 5px 28px; }
+
+    /* ---- Configuración + pie ---- */
+    .settings { margin: auto 20px 0; border-top: 1px solid var(--border); }
+    .settings > summary {
+      display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none;
+      font-size: 12.5px; font-weight: 500; color: var(--muted); user-select: none;
+    }
+    .settings > summary::-webkit-details-marker { display: none; }
+    .settings > summary:hover { color: var(--text); }
+    .settings > summary .chev { margin-left: auto; transition: transform .15s; }
+    .settings[open] > summary .chev { transform: rotate(90deg); }
+    .settings-body { padding-bottom: 16px; }
+    .settings-body .field-label:first-child { margin-top: 0; }
+    .copyrow { display: flex; align-items: center; gap: 6px; }
+    .copyrow code {
+      flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; word-break: break-all;
+      font: 11.5px/1.4 var(--mono); background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    }
+    .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+    #stepsFoot { padding: 12px 20px 16px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--faint); line-height: 1.6; }
+    #stepsFoot b { color: var(--muted); font-weight: 600; }
+
+    /* ============================================================
+       VISOR
+       ============================================================ */
+    #viewerWrap { flex: 1; position: relative; min-width: 0; background: var(--bg); }
+    #forgeViewer { position: absolute; inset: 0; }
+    #placeholder {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 32px; overflow: auto;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+    .empty { max-width: 640px; }
+    .empty .kicker { font-size: 11.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--brand); }
+    :root[data-theme="dark"] .empty .kicker { color: #e2686b; }
+    .empty h2 { margin: 10px 0 10px; font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -.5px; text-wrap: balance; }
+    .empty p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--muted); max-width: 56ch; }
+    .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 26px; }
+    .flow .lbl { width: 100%; font-size: 11.5px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
+    .stage {
+      display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px 7px 9px; border-radius: 999px;
+      background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; font-weight: 500;
+    }
+    .stage i { width: 12px; height: 12px; border-radius: 4px; display: block; }
+    .flow > .icon { color: var(--faint); width: 14px; height: 14px; flex-basis: 14px; }
+
+    #showAllBtn {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 40;
+      background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: var(--shadow);
+    }
+    #showAllBtn:hover { background: var(--surface-2); }
+
+    #status {
+      position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50;
+      display: none; align-items: center; gap: 10px; max-width: min(640px, 86%);
+      padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.45;
+      background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+    }
+    .has-model #status { bottom: 92px; }      /* por encima de la barra del visor */
+    #status .icon { color: var(--ok); }
+    #status.busy .icon { color: var(--accent); animation: spin 1s linear infinite; }
+    #status.err { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
+    #status.err .icon { color: var(--danger); }
+    #status .x { margin: -4px -6px -4px 2px; width: 26px; height: 26px; flex-basis: 26px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #tip {
+      position: fixed; z-index: 1000; pointer-events: none; max-width: 260px;
+      padding: 6px 9px; border-radius: 7px; font-size: 12px; line-height: 1.4;
+      background: var(--ink); color: #f1f0ec; box-shadow: var(--shadow);
+    }
+    :root[data-theme="dark"] #tip { background: #f1f0ec; color: #1c1c1a; }
+
+    /* ============================================================
+       PANEL DERECHO (Avance / Filtros)
+       ============================================================ */
+    .dock {
+      width: var(--dock-w); flex: 0 0 var(--dock-w); background: var(--surface);
+      border-left: 1px solid var(--border); display: none; flex-direction: column; min-height: 0;
+    }
+    .dock.open { display: flex; }
+    .pane { display: none; flex-direction: column; min-height: 0; flex: 1; }
+    .dock[data-pane="progress"] #progressPanel,
+    .dock[data-pane="filters"] #filterPanel { display: flex; }
+    .pane-head { display: flex; align-items: center; gap: 10px; padding: 12px 10px 12px 18px; border-bottom: 1px solid var(--border); }
+    .pane-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    .pane-head .icon-btn { margin-left: auto; }
+    .pane-body { overflow: auto; flex: 1; padding: 18px; }
+    .pane-body.drag { outline: 2px dashed var(--accent); outline-offset: -8px; }
+    .sec { margin-top: 22px; }
+    .pp-h {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px;
+      color: var(--faint); margin: 0 0 9px;
+    }
+    .pp-h span { font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+    /* ---- Fuente de datos ---- */
+    .srcs > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; user-select: none; }
+    .srcs > summary::-webkit-details-marker { display: none; }
+    .srcs > summary .pp-h { margin: 0; }
+    .srcs > summary .icon { width: 13px; height: 13px; flex-basis: 13px; color: var(--faint); transition: transform .15s; }
+    .srcs[open] > summary .icon { transform: rotate(90deg); }
+    .srcs[open] > summary { margin-bottom: 10px; }
+    .src {
+      display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; text-align: left;
+      border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text);
+      font: inherit; cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .src + .src { margin-top: 8px; }
+    .src:hover { border-color: var(--accent); background: var(--surface-2); }
+    .src .src-ico { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; display: grid; place-items: center; background: var(--surface-3); color: var(--muted); }
+    .src .src-txt { flex: 1; min-width: 0; }
+    .src b { display: block; font-size: 13px; font-weight: 600; }
+    .src small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+    .src .src-ok { display: none; color: var(--ok); }
+    .src.on { border-color: var(--ok); }
+    .src.on .src-ok { display: block; }
+    #ppInfo { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+    #ppInfo:empty { display: none; }
+    #ppInfo b { color: var(--text); }
+    #ppMatchInfo { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 10px 0; }
+    #ppMatchInfo b { color: var(--text); }
+    #ppDiag {
+      display: none; margin-top: 12px; padding: 10px 12px; max-height: 240px; overflow: auto;
+      font-size: 11.5px; line-height: 1.55; color: var(--muted);
+      background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    }
+    #ppDiag b { color: var(--text); }
+    #ppDiag code { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+
+    /* ---- Indicador principal ---- */
+    .hero { padding: 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); }
+    .hero-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+    .hero-num { font-size: 52px; font-weight: 700; line-height: .95; letter-spacing: -1.5px; margin-top: 8px; }
+    .hero-num small { font-size: 24px; font-weight: 600; letter-spacing: 0; color: var(--muted); margin-left: 2px; }
+    .hero-side { font-size: 12px; color: var(--muted); text-align: right; line-height: 1.55; padding-bottom: 3px; }
+    .hero-side b { color: var(--text); font-weight: 600; }
+    .seg { display: flex; gap: 2px; }
+    .seg span { display: block; min-width: 3px; }
+    .seg.thin { height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-3); }
+    .seg.tall { height: 28px; }
+    .seg.tall span { display: flex; align-items: center; padding-left: 8px; border-radius: 4px; overflow: visible; }
+    .seg.tall i { font-style: normal; font-size: 11.5px; font-weight: 600; }
+    .meters { margin-top: 16px; display: grid; gap: 12px; }
+    .meter-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); }
+    .meter-top b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .meter { height: 6px; border-radius: 3px; margin-top: 6px; overflow: hidden; background: color-mix(in srgb, var(--st-vac) 24%, transparent); }
+    .meter span { display: block; height: 100%; border-radius: 3px; background: var(--st-vac); }
+    .hero .hint { margin-top: 14px; font-size: 11.5px; color: var(--faint); }
+
+    /* ---- Leyenda de estados ---- */
+    .leg {
+      display: flex; align-items: center; gap: 10px; padding: 7px 8px; margin: 0 -8px;
+      border-radius: 7px; cursor: pointer; font-size: 13px;
+    }
+    .leg:hover { background: var(--surface-2); }
+    .leg .sw { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 12px; }
+    .leg .lc { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .leg.is-iso, .cat.is-iso { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent); }
+
+    /* ---- Filtros rápidos (chips) ---- */
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+      font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--faint);
+      cursor: pointer; user-select: none; transition: color .15s, border-color .15s, background .15s;
+    }
+    .chip:hover { color: var(--text); }
+    .chip.on { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+    .chip[data-st]::before { content: ""; width: 9px; height: 9px; border-radius: 3px; background: var(--border); }
+    .chip[data-st].on::before { background: var(--c, #888); }
+    .chip.preset { border-style: dashed; color: var(--muted); }
+
+    /* ---- Filas por categoría / piso ---- */
+    .cat { padding: 10px 8px; margin: 0 -8px; border-radius: 8px; cursor: pointer; transition: background .12s; }
+    .cat:hover { background: var(--surface-2); }
+    .cat-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+    .cat-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cat-pct { font-size: 13px; font-weight: 650; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+    .cat-meta { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+    .cat.floor { display: grid; grid-template-columns: minmax(0, 1fr) 118px 40px; align-items: center; gap: 10px; padding: 7px 8px; }
+    .cat.floor .cat-name { font-size: 12.5px; font-weight: 400; }
+    .cat.floor .cat-pct { text-align: right; font-size: 12.5px; font-weight: 600; }
+    .cat.floor .seg.thin { height: 6px; border-radius: 3px; }
+
+    /* ---- Panel de filtros (niveles / categorías) ---- */
+    #filterPanel .pane-body { padding: 4px 0 12px; }
+    .fp-section { border-bottom: 1px solid var(--border-soft); padding-bottom: 6px; }
+    .fp-sec-head {
+      display: flex; align-items: center; gap: 8px; padding: 14px 18px 8px; cursor: pointer; user-select: none;
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--faint);
+    }
+    .fp-sec-head .icon { width: 13px; height: 13px; flex-basis: 13px; transform: rotate(90deg); transition: transform .15s; }
+    .fp-sec-head.collapsed .icon { transform: none; }
+    .fp-sec-head .count { margin-left: auto; font-weight: 500; }
+    .fp-actions { display: flex; gap: 14px; padding: 0 18px 8px; }
+    .fp-actions a { font-size: 12px; color: var(--accent); cursor: pointer; }
+    .fp-actions a:hover { text-decoration: underline; }
+    .fp-list { padding: 0 10px 6px; }
+    .fp-list.collapsed { display: none; }
+    .fp-item { display: flex; align-items: center; gap: 9px; padding: 6px 8px; font-size: 13px; border-radius: 6px; cursor: pointer; }
+    .fp-item:hover { background: var(--surface-2); }
+    .fp-item input { accent-color: var(--brand); cursor: pointer; width: 15px; height: 15px; margin: 0; }
+    .fp-item .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .fp-item .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .fp-empty { color: var(--muted); font-size: 12.5px; padding: 6px 8px 10px; }
+
+    /* ============================================================
+       PANTALLAS ESTRECHAS
+       ============================================================ */
+    @media (max-width: 1180px) { .topbar .crumb { display: none; } }
+    @media (max-width: 980px) {
+      .sidebar { position: absolute; z-index: 60; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow); max-width: 100%; }
+      .dock { position: absolute; z-index: 60; top: 0; bottom: 0; right: 0; box-shadow: var(--shadow); width: min(var(--dock-w), 100%); }
+      .topbar .titles, .topbar .sep { display: none; }
+      .tool span { display: none; }
+      .empty h2 { font-size: 24px; }
+    }
+    @media (max-width: 560px) {
+      .conn { font-size: 0; gap: 0; }
+      #logoutBtn span { display: none; }
+      #placeholder { padding: 20px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Iconos -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20V11M12 20V4M19 20v-6M2.5 20h19"/></symbol>
+      <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8.5V19l-4-2v-3.5z"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.5 6.5 0 0 0 10 10z"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 0 0 .6-8.96 6 6 0 0 0-11.7 1.5A3.8 3.8 0 0 0 7 19z"/></symbol>
+      <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+      <symbol id="i-sheet" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></symbol>
+      <symbol id="i-building" viewBox="0 0 24 24"><path d="M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16M16 10h2a2 2 0 0 1 2 2v9M3 21h18M9 7h3M9 11h3M9 15h3"/></symbol>
+      <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.2h.01"/></symbol>
+      <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+      <symbol id="i-brush" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.3A4.7 4.7 0 0 0 22 9.7C22 6 17.5 3 12 3z"/><path d="M7.5 11.5h.01M10 7.5h.01M15 7.5h.01"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app" id="app">
+
+    <header class="topbar">
+      <button class="icon-btn" id="navToggle" title="Mostrar u ocultar el panel de conexión" aria-label="Mostrar u ocultar el panel de conexión">
+        <svg class="icon" aria-hidden="true"><use href="#i-panel"/></svg>
+      </button>
+      <a class="brand" href="https://murosytechos.com/" target="_blank" rel="noopener" title="Muros y Techos">
+        <img src="https://murosytechos.com/wp-content/uploads/2023/11/logo-myt.svg" alt="Muros y Techos"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+        <span class="brand-fallback" style="display:none">Muros y Techos</span>
+      </a>
+      <span class="sep"></span>
+      <div class="titles">
+        <h1>Visualizador de Avance de Obra</h1>
+        <span class="crumb" id="modelName" hidden></span>
+      </div>
+      <div class="spacer"></div>
+
+      <div class="tools" id="viewerTools" hidden>
+        <button class="tool" id="progressBtn" style="display:none" title="Indicadores de avance por estado de los assets">
+          <svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span>Avance</span>
+        </button>
+        <button class="tool" id="filterBtn" style="display:none" title="Mostrar u ocultar niveles y categorías">
+          <svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg><span>Filtros</span>
+        </button>
+        <button class="tool" id="propsBtn" style="display:none" title="Propiedades del elemento seleccionado">
+          <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><span>Propiedades</span>
+        </button>
+      </div>
+
+      <span class="conn" id="connState">Sin conexión</span>
+      <button class="icon-btn" id="themeBtn" title="Cambiar entre tema claro y oscuro" aria-label="Cambiar entre tema claro y oscuro"></button>
+      <button class="btn ghost sm" id="logoutBtn" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg><span>Salir</span>
+      </button>
+    </header>
+
+    <div class="main">
+
+      <!-- ============ PANEL IZQUIERDO: ASISTENTE ============ -->
+      <aside class="sidebar" id="steps">
+        <div class="side-head">
+          <div class="kicker">Autodesk Construction Cloud</div>
+          <h2>Abrir un modelo</h2>
+        </div>
+
+        <div class="steps">
+          <!-- PASO 1 -->
+          <section class="step active" id="step1">
+            <div class="badge">1</div>
+            <h3 class="step-title">Conecta tu cuenta</h3>
+            <p class="step-sub">Inicia sesión con Autodesk. Puede entrar cualquier persona con acceso al proyecto.</p>
+            <div class="step-body">
+              <div id="loginArea">
+                <button id="loginBtn" class="btn block">Iniciar sesión con Autodesk</button>
+                <div class="paste" id="pasteBox" hidden>
+                  <ol>
+                    <li>Inicia sesión en la pestaña de Autodesk que se abrió.
+                        <a class="link" id="pasteOpen" href="#" target="_blank" rel="noopener">Abrirla de nuevo</a></li>
+                    <li>Al terminar verás «No se puede acceder a este sitio». Es lo esperado.</li>
+                    <li>Copia la dirección completa de esa pestaña y pégala aquí.</li>
+                  </ol>
+                  <input id="pasteInput" class="input mono" type="text" autocomplete="off" spellcheck="false"
+                         placeholder="http://localhost:8080/?code=…" />
+                  <button id="pasteBtn" class="btn ghost sm block">Completar conexión</button>
+                </div>
+                <p class="note" id="modeNote" hidden></p>
+              </div>
+              <div class="ok-line" id="loggedArea" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+                <span>Sesión activa. Se renueva sola mientras uses la app.</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- PASO 2 -->
+          <section class="step" id="step2">
+            <div class="badge">2</div>
+            <h3 class="step-title">Elige el modelo</h3>
+            <p class="step-sub">Pega la dirección del archivo abierto en Construction Cloud, o búscalo en tus proyectos.</p>
+            <div class="step-body">
+              <input id="linkInput" class="input" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="https://acc.autodesk.com/build/files/projects/…" />
+              <div class="selnote" id="selNote"></div>
+              <details class="tree-wrap">
+                <summary><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg>Buscar en mis proyectos</summary>
+                <div id="tree"></div>
+              </details>
+            </div>
+          </section>
+
+          <!-- PASO 3 -->
+          <section class="step" id="step3">
+            <div class="badge">3</div>
+            <h3 class="step-title">Abre el visualizador</h3>
+            <p class="step-sub">Carga el modelo 3D. Después podrás colorearlo según el avance de obra.</p>
+            <div class="step-body">
+              <button id="generateBtn" class="btn block" disabled>Generar visualizador</button>
+            </div>
+          </section>
+        </div>
+
+        <details class="settings" id="settings">
+          <summary>
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>
+            Configuración de la conexión
+            <svg class="icon chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+          </summary>
+          <div class="settings-body">
+            <span class="field-label">Callback URL registrada en la app de APS</span>
+            <div class="copyrow">
+              <code id="redirectUriLabel"></code>
+              <button class="icon-btn" id="copyCb" title="Copiar" aria-label="Copiar la Callback URL">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>
+              </button>
+            </div>
+            <p class="hint" id="cbHint"></p>
+            <label class="field-label" for="cfgClient">Client ID de la app de APS</label>
+            <input id="cfgClient" class="input mono" type="text" autocomplete="off" spellcheck="false" />
+            <label class="field-label" for="cfgRegion">Región donde están los datos</label>
+            <select id="cfgRegion" class="select">
+              <option value="US">Estados Unidos (US)</option>
+              <option value="EMEA">Europa (EMEA)</option>
+            </select>
+            <div class="btn-row">
+              <button id="cfgSave" class="btn sm">Guardar</button>
+              <button id="cfgReset" class="btn ghost sm">Restablecer</button>
+            </div>
+          </div>
+        </details>
+
+        <footer id="stepsFoot">
+          <b>Muros y Techos</b> · Avance de obra<br>
+          Datos vía <a class="link" href="https://aps.autodesk.com/" target="_blank" rel="noopener">Autodesk Platform Services</a>
+        </footer>
+      </aside>
+
+      <!-- ============ VISOR ============ -->
+      <section id="viewerWrap">
+        <div id="forgeViewer"></div>
+
+        <div id="placeholder">
+          <div class="empty">
+            <div class="kicker">Modelo 4D · Assets de Autodesk Build</div>
+            <h2>El avance de obra, sobre el modelo</h2>
+            <p>Abre un modelo de Construction Cloud y coloréalo según el estado de sus assets.
+               Verás cuánto está vaciado por categoría y por piso, con áreas y volúmenes.</p>
+            <div class="flow" id="stageFlow"></div>
+          </div>
+        </div>
+
+        <button class="btn sm" id="showAllBtn" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>Ver todo el modelo
+        </button>
+        <div id="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- ============ PANEL DERECHO ============ -->
+      <aside class="dock" id="dock">
+
+        <!-- Avance de obra (assets) -->
+        <div class="pane" id="progressPanel">
+          <div class="pane-head">
+            <h2>Avance de obra</h2>
+            <button class="icon-btn" id="ppClose" title="Cerrar" aria-label="Cerrar el panel">
+              <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+            </button>
+          </div>
+          <div class="pane-body" id="ppBody">
+
+            <details class="srcs" id="srcDetails" open>
+              <summary><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg><div class="pp-h">Fuente de los assets</div></summary>
+              <button class="src" id="loadAccBtn" data-src="acc">
+                <span class="src-ico"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span>
+                <span class="src-txt"><b>Assets de ACC, en vivo</b><small>Lee el proyecto del modelo abierto</small></span>
+                <svg class="icon src-ok" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <button class="src" id="loadDcBtn" data-src="dc">
+                <span class="src-ico"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg></span>
+                <span class="src-txt"><b>Data Connector</b><small>Último extracto completado de la cuenta</small></span>
+                <svg class="icon src-ok" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+              <input type="file" id="xlsxInput" accept=".xlsx,.xls,.csv" style="display:none" />
+              <button class="src" id="loadXlsxBtn" data-src="file">
+                <span class="src-ico"><svg class="icon" aria-hidden="true"><use href="#i-sheet"/></svg></span>
+                <span class="src-txt"><b>Excel o CSV</b><small>Elige el archivo o arrástralo a este panel</small></span>
+                <svg class="icon src-ok" aria-hidden="true"><use href="#i-check"/></svg>
+              </button>
+            </details>
+            <div id="ppInfo"></div>
+
+            <div class="sec" id="ppMatch" style="display:none">
+              <div class="pp-h">Emparejar con el modelo</div>
+              <select id="ppStrategy" class="select" aria-label="Estrategia de emparejamiento">
+                <option value="auto">Auto · Categoría + Piso (recomendado)</option>
+                <option value="b3f">B3F ID · 1:1 exacto</option>
+                <option value="name_storey">Nombre + Piso</option>
+                <option value="name">Solo Nombre</option>
+                <option value="category">Categoría (agregado)</option>
+              </select>
+              <div id="ppLinkWrap" style="display:none">
+                <label class="field-label" for="ppLinkProp">Propiedad de enlace (B3F ID)</label>
+                <select id="ppLinkProp" class="select">
+                  <option value="__auto__">Auto-detectar (recomendado)</option>
+                  <option value="__externalId__">ID externo (Revit UniqueId)</option>
+                </select>
+              </div>
+              <div id="ppMatchInfo"></div>
+              <button id="applyColorsBtn" class="btn block">
+                <svg class="icon" aria-hidden="true"><use href="#i-brush"/></svg>Emparejar y aplicar colores
+              </button>
+              <button id="clearColorsBtn" class="btn ghost block" style="margin-top:8px">Quitar colores</button>
+              <div id="ppDiag"></div>
+            </div>
+
+            <div class="sec" id="ppDash" style="display:none"></div>
+            <div class="sec" id="ppLegend" style="display:none"></div>
+            <div class="sec" id="ppFilters" style="display:none"></div>
+            <div id="ppDashDetail" style="display:none"></div>
+            <div class="sec" id="ppExcelSum" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- Filtros por nivel y categoría -->
+        <div class="pane" id="filterPanel">
+          <div class="pane-head">
+            <h2>Filtros del modelo</h2>
+            <button class="icon-btn" id="fpClose" title="Cerrar" aria-label="Cerrar el panel">
+              <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+            </button>
+          </div>
+          <div class="pane-body">
+            <div class="fp-section">
+              <div class="fp-sec-head" data-target="lvlList">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg>
+                <span>Niveles</span><span class="count" id="lvlCount"></span>
+              </div>
+              <div class="fp-actions">
+                <a data-group="level" data-all="1">Todos</a>
+                <a data-group="level" data-all="0">Ninguno</a>
+              </div>
+              <div class="fp-list" id="lvlList"></div>
+            </div>
+            <div class="fp-section">
+              <div class="fp-sec-head" data-target="catList">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg>
+                <span>Categorías</span><span class="count" id="catCount"></span>
+              </div>
+              <div class="fp-actions">
+                <a data-group="category" data-all="1">Todas</a>
+                <a data-group="category" data-all="0">Ninguna</a>
+              </div>
+              <div class="fp-list" id="catList"></div>
+            </div>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </div>
+
+  <div id="tip" hidden></div>
+
+  <script>
+  /* ============================================================
+     UTILIDADES
+     ============================================================ */
+  const byId = (id) => document.getElementById(id);
+  const ico  = (n) => `<svg class="icon" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const esc  = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // Almacenamiento tolerante: si el navegador bloquea localStorage, usa memoria.
+  const mem = {};
+  const store = {
+    get(k) { try { const v = localStorage.getItem(k); if (v != null) return v; } catch (e) {} return (k in mem) ? mem[k] : null; },
+    set(k, v) { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) {} },
+    del(k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} }
+  };
+
+  /* ============================================================
+     CONFIGURACIÓN
+     La app funciona en tres contextos, sin tocar el código:
+       · Publicada en una dirección https  → la Callback URL es la propia dirección.
+       · En http://localhost:8080/          → como antes (servidor local).
+       · Abierta con doble clic (file://)   → el login se completa pegando la
+                                              dirección de retorno (sin servidor).
+     ============================================================ */
+  const DEFAULTS = {
+    clientId: "D1wwuhP2hE2KEb0tGqCw3CBvHRFQa0dq63pBxEl6PfgYGTGr",
+    region: "US"                                   // "US" | "EMEA"
+  };
+  const LOCAL_CALLBACK = "http://localhost:8080/";  // ya registrada en la app de APS
+  const SETTINGS = Object.assign({}, DEFAULTS);
+  try { Object.assign(SETTINGS, JSON.parse(store.get("aps_settings") || "{}")); } catch (e) {}
+
+  const CLIENT_ID    = SETTINGS.clientId || DEFAULTS.clientId;
+  const FILE_MODE    = location.protocol === "file:";
+  const IS_LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  // En localhost siempre la raíz del origen (coincide con la Callback URL registrada
+  // aunque la página se abra con otro nombre de archivo). Publicada: su propia dirección.
+  const REDIRECT_URI = FILE_MODE ? LOCAL_CALLBACK
+    : IS_LOCALHOST ? location.origin + "/"
+    : location.origin + location.pathname.replace(/index\.html?$/i, "");
+  const SCOPES = "data:read viewables:read account:read";
+
+  const BASE = "https://developer.api.autodesk.com";
+  const AUTH_URL  = BASE + "/authentication/v2/authorize";
+  const TOKEN_URL = BASE + "/authentication/v2/token";
+
+  /* ============================================================
+     TOKEN (con renovación automática mediante refresh token)
+     ============================================================ */
+  const TOKEN_KEY = "aps_token";
+  let refreshTimer = null, refreshing = null;
+
+  function readToken() {
+    try { return JSON.parse(store.get(TOKEN_KEY) || "null"); } catch (e) { return null; }
+  }
+  function saveToken(tok) {
+    tok.expires_at = Date.now() + (tok.expires_in - 60) * 1000;
+    store.set(TOKEN_KEY, JSON.stringify(tok));
+    scheduleRefresh();
+  }
+  // "¿Hay sesión?" — válida si el token sigue vigente o si se puede renovar.
+  function getToken() {
+    const tok = readToken();
+    if (!tok) return null;
+    if (Date.now() < tok.expires_at || tok.refresh_token) return tok;
+    store.del(TOKEN_KEY);
+    return null;
+  }
+  function clearToken() { store.del(TOKEN_KEY); clearTimeout(refreshTimer); }
+
+  // Devuelve un token vigente; lo renueva si expiró (o si force = true).
+  async function ensureToken(force) {
+    const tok = readToken();
+    if (!tok) return null;
+    if (!force && Date.now() < tok.expires_at) return tok;
+    if (!tok.refresh_token) { clearToken(); return null; }
+    if (!refreshing) refreshing = doRefresh(tok).finally(() => { refreshing = null; });
+    return refreshing;
+  }
+  async function doRefresh(tok) {
+    try {
+      const res = await fetch(TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: tok.refresh_token }).toString()
+      });
+      if (!res.ok) {
+        // Refresh token vencido o revocado: hay que volver a iniciar sesión.
+        if (res.status >= 400 && res.status < 500) { clearToken(); refreshSteps(); }
+        return null;
+      }
+      const nt = await res.json();
+      if (!nt.refresh_token) nt.refresh_token = tok.refresh_token;
+      saveToken(nt);
+      return nt;
+    } catch (e) { return null; }                   // sin red: se reintenta en la próxima llamada
+  }
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    const tok = readToken();
+    if (!tok || !tok.refresh_token) return;
+    const ms = Math.max(15000, tok.expires_at - Date.now() - 120000);   // ~2 min antes de expirar
+    refreshTimer = setTimeout(() => { ensureToken(true); }, Math.min(ms, 2147000000));
+  }
+
+  /* ============================================================
+     PKCE
+     ============================================================ */
+  const PKCE_KEY = "aps_pkce";
+  let pkceMem = null;
+
+  function randomString(len) {
+    const arr = new Uint8Array(len);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => ("0" + b.toString(16)).slice(-2)).join("").slice(0, len);
+  }
+  function base64url(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  async function sha256(str) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  }
+
+  async function login() {
+    if (!window.crypto || !crypto.subtle) {
+      showStatus("Esta dirección no es segura (http). Publica la app en una dirección https o ábrela con doble clic.", true);
+      return;
+    }
+    // Sin servidor: la pestaña se abre en el mismo clic (evita el bloqueo de ventanas emergentes).
+    let tab = null;
+    if (FILE_MODE) { try { tab = window.open("about:blank", "_blank"); } catch (e) {} }
+
+    const verifier = randomString(64);
+    const challenge = base64url(await sha256(verifier));
+    const state = randomString(16);
+    pkceMem = { verifier, state };
+    store.set(PKCE_KEY, JSON.stringify(pkceMem));
+    const params = new URLSearchParams({
+      response_type: "code", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
+      scope: SCOPES, state, nonce: randomString(16),
+      code_challenge: challenge, code_challenge_method: "S256"
+    });
+    const authUrl = AUTH_URL + "?" + params.toString();
+
+    if (!FILE_MODE) { window.location.href = authUrl; return; }
+
+    if (tab) { try { tab.opener = null; } catch (e) {} tab.location.href = authUrl; }
+    byId("pasteOpen").href = authUrl;
+    byId("pasteBox").hidden = false;
+    byId("modeNote").hidden = true;
+    byId("loginBtn").textContent = "Volver a abrir el inicio de sesión";
+    byId("pasteInput").focus();
+    showStatus(tab ? "Inicia sesión en la pestaña nueva y vuelve aquí."
+                   : "El navegador bloqueó la pestaña. Usa el enlace «Abrirla de nuevo».", !tab);
+  }
+
+  // Canjea el código de autorización por el token (flujo PKCE, sin secreto).
+  async function exchangeCode(code, state) {
+    let p = pkceMem;
+    if (!p) { try { p = JSON.parse(store.get(PKCE_KEY) || "null"); } catch (e) {} }
+    if (!p || state !== p.state) throw new Error("El inicio de sesión no coincide con este intento. Pulsa de nuevo «Iniciar sesión».");
+    const body = new URLSearchParams({
+      grant_type: "authorization_code", client_id: CLIENT_ID, code,
+      redirect_uri: REDIRECT_URI, code_verifier: p.verifier
+    });
+    let res;
+    try {
+      res = await fetch(TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString()
+      });
+    } catch (e) { throw new Error("No se pudo contactar con Autodesk. Revisa la conexión a internet."); }
+    if (!res.ok) {
+      let why = await res.text();
+      try { const j = JSON.parse(why); why = j.error_description || j.error || why; } catch (e) {}
+      throw new Error("Autodesk no aceptó el código de acceso (" + why + "). Pulsa de nuevo «Iniciar sesión».");
+    }
+    saveToken(await res.json());
+    pkceMem = null; store.del(PKCE_KEY);
+    store.set("aps_login_ok", "1");
+  }
+
+  // Vuelta del login por redirección (app publicada o en localhost).
+  async function handleRedirect() {
+    if (FILE_MODE) return;
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const err = url.searchParams.get("error");
+    if (err) { showStatus("Error de inicio de sesión: " + (url.searchParams.get("error_description") || err), true); cleanUrl(); return; }
+    if (!code) return;
+    try { await exchangeCode(code, state); showStatus("Conectado con Autodesk."); }
+    catch (e) { showStatus(e.message, true); }
+    cleanUrl();
+  }
+  function cleanUrl() { history.replaceState({}, document.title, REDIRECT_URI); }
+
+  // Vuelta del login sin servidor: el usuario pega la dirección de retorno.
+  async function completeFromPaste() {
+    const raw = byId("pasteInput").value.trim();
+    if (!raw) return;
+    let code = null, state = null, err = null;
+    try {
+      const u = new URL(raw);
+      code = u.searchParams.get("code"); state = u.searchParams.get("state");
+      err = u.searchParams.get("error_description") || u.searchParams.get("error");
+    } catch (e) {
+      const c = raw.match(/[?&]code=([^&#\s]+)/), s = raw.match(/[?&]state=([^&#\s]+)/);
+      if (c) code = decodeURIComponent(c[1]);
+      if (s) state = decodeURIComponent(s[1]);
+    }
+    if (err) { showStatus("Autodesk rechazó el inicio de sesión: " + err, true); return; }
+    if (!code) { showStatus("Esa dirección no trae el código de acceso. Copia la dirección completa de la pestaña (contiene «?code=»).", true); return; }
+    const btn = byId("pasteBtn");
+    btn.disabled = true;
+    try {
+      await exchangeCode(code, state);
+      byId("pasteInput").value = "";
+      byId("pasteBox").hidden = true;
+      refreshSteps();
+      showStatus("Conectado con Autodesk.");
+    } catch (e) { showStatus(e.message, true); }
+    btn.disabled = false;
+  }
+
+  /* ============================================================
+     API Data Management
+     ============================================================ */
+  async function api(path) {
+    const tok = await ensureToken();
+    if (!tok) { refreshSteps(); throw new Error("Sesión no iniciada o expirada. Inicia sesión de nuevo."); }
+    const res = await fetch(BASE + path, { headers: { Authorization: "Bearer " + tok.access_token } });
+    if (res.status === 401) { clearToken(); refreshSteps(); throw new Error("Sesión expirada"); }
+    if (!res.ok) throw new Error(path + " → " + res.status + " " + (await res.text()));
+    return res.json();
+  }
+  const getHubs       = ()             => api("/project/v1/hubs");
+  const getProjects   = (hub)          => api(`/project/v1/hubs/${hub}/projects`);
+  const getTopFolders = (hub, proj)    => api(`/project/v1/hubs/${hub}/projects/${proj}/topFolders`);
+  const getFolder     = (proj, folder) => api(`/data/v1/projects/${proj}/folders/${encodeURIComponent(folder)}/contents`);
+  const getVersions   = (proj, item)   => api(`/data/v1/projects/${proj}/items/${encodeURIComponent(item)}/versions`);
+
+  /* ---- Assets API de ACC (proj = UUID SIN prefijo "b.") ---- */
+  const ASSETS = (proj) => `/construction/assets/v2/projects/${proj}`;
+  const getAssetCategories = (proj) => api(ASSETS(proj) + "/asset-categories");
+  const getAssetStatusSets = (proj) => api(ASSETS(proj) + "/asset-status-sets");
+  const getAssetCustomAttrs= (proj) => api(ASSETS(proj) + "/custom-attribute-definitions");
+  const getAssetsPage      = (proj, limit, offset) =>
+    api(ASSETS(proj) + `/assets?limit=${limit}&offset=${offset}`);
+
+  /* ---- Data Connector de ACC (acc = UUID de la cuenta SIN prefijo "b.") ---- */
+  const DC = (acc) => `/data-connector/v1/accounts/${acc}`;
+  const dcGetRequests = (acc)         => api(DC(acc) + "/requests?limit=100&offset=0");
+  const dcGetJobs     = (acc, reqId)  => api(DC(acc) + `/requests/${reqId}/jobs?limit=100&offset=0`);
+  const dcGetDataList = (acc, jobId)  => api(DC(acc) + `/jobs/${jobId}/data-listing`);
+  const dcGetData     = (acc, jobId, key) => api(DC(acc) + `/jobs/${jobId}/data/${encodeURIComponent(key)}`);
+
+  /* ============================================================
+     ESTADO DEL ASISTENTE (3 pasos)
+     ============================================================ */
+  const linkInput = byId("linkInput");
+  const generateBtn = byId("generateBtn");
+  const selNote = byId("selNote");
+  let selected = null;          // { urn, name, viewableGuid } cuando se elige desde el árbol
+  let currentProjectId = null;  // UUID del proyecto ACC (sin prefijo "b.") para la Assets API
+  let currentAccountId = null;  // UUID de la cuenta ACC (sin prefijo "b.") para el Data Connector
+  let generated = false;        // ya se generó el visualizador con la selección actual
+
+  function setStep(id, cls) {
+    const el = byId(id);
+    el.classList.remove("active", "done");
+    if (cls) el.classList.add(cls);
+    const b = el.querySelector(".badge");
+    if (cls === "done") b.innerHTML = ico("check");
+    else b.textContent = id.replace("step", "");
+  }
+
+  function step2Ready() {
+    return !!selected || linkInput.value.trim().length > 0;
+  }
+
+  function refreshSteps() {
+    const logged = !!getToken();
+    byId("logoutBtn").hidden = !logged;
+    byId("loginArea").hidden = logged;
+    byId("loggedArea").hidden = !logged;
+    const conn = byId("connState");
+    conn.textContent = logged ? "Conectado" : "Sin conexión";
+    conn.className = "conn" + (logged ? " ok" : "");
+
+    if (!logged) {
+      setStep("step1", "active");
+      setStep("step2", null);
+      setStep("step3", null);
+      generateBtn.disabled = true;
+      treeBuilt = false;
+      byId("tree").innerHTML = "";
+      return;
+    }
+    setStep("step1", "done");
+    if (step2Ready()) {
+      setStep("step2", "done");
+      setStep("step3", generated ? "done" : "active");
+      generateBtn.disabled = false;
+    } else {
+      setStep("step2", "active");
+      setStep("step3", null);
+      generateBtn.disabled = true;
+    }
+  }
+
+  /* ============================================================
+     ÁRBOL (opcional)
+     ============================================================ */
+  const treeEl = byId("tree");
+  let treeBuilt = false;
+  const NODE_ICON = { hub: "building", project: "box", folder: "folder", file: "file" };
+
+  function makeNode({ label, type, expandable }) {
+    const wrap = document.createElement("div");
+    const node = document.createElement("div");
+    node.className = "node " + type;
+    node.innerHTML = `<span class="twisty">${expandable ? ico("chevron") : ""}</span><span class="ico">${ico(NODE_ICON[type] || "file")}</span><span class="lbl"></span>`;
+    node.querySelector(".lbl").textContent = label;
+    node.title = label;
+    const children = document.createElement("div");
+    children.className = "children";
+    wrap.appendChild(node); wrap.appendChild(children);
+    return { wrap, node, children };
+  }
+  function toggleChildren(node, children) { children.classList.toggle("open"); node.classList.toggle("loaded"); }
+  function loadingRow(c) { const s = document.createElement("div"); s.className = "spin"; s.textContent = "Cargando…"; c.appendChild(s); return () => s.remove(); }
+  function errRow(c, e) { const d = document.createElement("div"); d.className = "spin"; d.style.color = "var(--danger)"; d.textContent = "⚠ " + e.message; c.appendChild(d); }
+
+  async function buildHubs() {
+    treeEl.innerHTML = "";
+    const done = loadingRow(treeEl);
+    try {
+      const { data } = await getHubs();
+      done();
+      if (!data.length) { treeEl.innerHTML = '<div class="spin">No hay cuentas disponibles. Pide al administrador de ACC que apruebe esta app (Custom Integrations).</div>'; return; }
+      data.forEach(hub => {
+        const { wrap, node, children } = makeNode({ label: hub.attributes.name, type: "hub", expandable: true });
+        let loaded = false;
+        node.onclick = async () => {
+          toggleChildren(node, children); if (loaded) return; loaded = true;
+          const done = loadingRow(children);
+          try { const p = await getProjects(hub.id); done(); p.data.forEach(x => children.appendChild(buildProject(hub.id, x).wrap)); }
+          catch (e) { done(); errRow(children, e); loaded = false; }
+        };
+        treeEl.appendChild(wrap);
+      });
+    } catch (e) { done(); errRow(treeEl, e); treeBuilt = false; }
+  }
+  function buildProject(hubId, p) {
+    const { wrap, node, children } = makeNode({ label: p.attributes.name, type: "project", expandable: true });
+    let loaded = false;
+    node.onclick = async () => {
+      currentAccountId = String(hubId).replace(/^b\./, "");   // cuenta para el Data Connector
+      toggleChildren(node, children); if (loaded) return; loaded = true;
+      const done = loadingRow(children);
+      try { const f = await getTopFolders(hubId, p.id); done(); f.data.forEach(x => children.appendChild(buildFolder(p.id, x).wrap)); }
+      catch (e) { done(); errRow(children, e); loaded = false; }
+    };
+    return { wrap };
+  }
+  function buildFolder(projId, f) {
+    const name = f.attributes.displayName || f.attributes.name;
+    const { wrap, node, children } = makeNode({ label: name, type: "folder", expandable: true });
+    let loaded = false;
+    node.onclick = async () => {
+      toggleChildren(node, children); if (loaded) return; loaded = true;
+      const done = loadingRow(children);
+      try {
+        const c = await getFolder(projId, f.id); done();
+        const items = c.data || [];
+        if (!items.length) { const e = document.createElement("div"); e.className = "spin"; e.textContent = "(vacío)"; children.appendChild(e); }
+        items.forEach(it => {
+          if (it.type === "folders") children.appendChild(buildFolder(projId, it).wrap);
+          else if (it.type === "items") children.appendChild(buildItem(projId, it).wrap);
+        });
+      } catch (e) { done(); errRow(children, e); loaded = false; }
+    };
+    return { wrap };
+  }
+  function buildItem(projId, it) {
+    const name = it.attributes.displayName || it.attributes.name || "modelo";
+    const { wrap, node } = makeNode({ label: name, type: "file", expandable: false });
+    node.onclick = async () => {
+      document.querySelectorAll(".node.file.active").forEach(n => n.classList.remove("active"));
+      node.classList.add("active");
+      showStatus("Resolviendo " + name + "…", false, true);
+      try {
+        const versions = await getVersions(projId, it.id);
+        const v = versions.data && versions.data[0];
+        if (!v) throw new Error("El archivo no tiene versiones.");
+        const der = v.relationships && v.relationships.derivatives && v.relationships.derivatives.data;
+        const urn = (der && der.id) ? der.id : base64url(new TextEncoder().encode(v.id));
+        chooseFromTree(urn, name, projId);
+      } catch (e) { showStatus("Error: " + e.message, true); }
+    };
+    return { wrap };
+  }
+
+  function chooseFromTree(urn, name, projId) {
+    if (projId) currentProjectId = String(projId).replace(/^b\./, "");   // para la Assets API
+    selected = { urn, name, viewableGuid: null };
+    generated = false;
+    linkInput.value = "";
+    selNote.style.display = "flex";
+    selNote.innerHTML = ico("check") + "<span></span>";
+    selNote.querySelector("span").textContent = name;
+    showStatus("Modelo seleccionado: " + name + ". Pulsa «Generar visualizador».");
+    refreshSteps();
+  }
+
+  /* ============================================================
+     RESOLVER URL / URN PEGADO  -> { urn, viewableGuid }
+     ============================================================ */
+  async function resolveInput(raw) {
+    raw = (raw || "").trim();
+    if (!raw) return null;
+
+    let projGuid, lineage, versionUrn, viewableGuid;
+    try {
+      const u = new URL(raw);
+      const qp = u.searchParams;
+      const m = u.pathname.match(/projects\/(?:b\.)?([0-9a-fA-F-]{36})/);
+      if (m) projGuid = m[1];
+      const entity = qp.get("entityId");
+      if (entity) {
+        if (/dm\.lineage:/.test(entity)) lineage = entity;
+        else if (/fs\.file:/.test(entity)) versionUrn = entity;
+      }
+      viewableGuid = qp.get("viewableGuid") || null;
+    } catch (e) { /* no era URL */ }
+
+    let s = raw; try { s = decodeURIComponent(raw); } catch (e) {}
+    if (!projGuid)   projGuid   = (s.match(/projects\/(?:b\.)?([0-9a-fA-F-]{36})/) || [])[1];
+    if (!lineage)    lineage    = (s.match(/urn:adsk\.[a-z0-9]+:dm\.lineage:[^&#\s"']+/i) || [])[0];
+    if (!versionUrn) versionUrn = (s.match(/urn:adsk\.[a-z0-9]+:fs\.file:[^&#\s"']+/i) || [])[0];
+    if (projGuid) currentProjectId = projGuid;   // para la Assets API (sin "b.")
+
+    if (versionUrn) return { urn: base64url(new TextEncoder().encode(versionUrn)), viewableGuid };
+
+    if (projGuid && lineage) {
+      showStatus("Resolviendo enlace de ACC…");
+      const versions = await getVersions("b." + projGuid, lineage);
+      const v = versions.data && versions.data[0];
+      if (!v) throw new Error("El elemento no tiene versiones traducidas.");
+      const der = v.relationships && v.relationships.derivatives && v.relationships.derivatives.data;
+      return { urn: (der && der.id) ? der.id : base64url(new TextEncoder().encode(v.id)), viewableGuid };
+    }
+
+    const candidate = raw.replace(/^urn:/i, "");
+    if (/^[A-Za-z0-9_=\-]+$/.test(candidate) && candidate.length > 30) return { urn: candidate, viewableGuid: null };
+
+    throw new Error("No reconozco el enlace. Pega la URL del archivo abierto en ACC, o su URN.");
+  }
+
+  /* ============================================================
+     PASO 3 — GENERAR VISUALIZADOR
+     ============================================================ */
+  async function generate() {
+    if (!getToken()) { showStatus("Inicia sesión primero (paso 1).", true); return; }
+    generateBtn.disabled = true;
+    try {
+      let target = selected;
+      if (!target) {
+        const r = await resolveInput(linkInput.value);
+        if (!r) { showStatus("Pega una URL en el paso 2.", true); return; }
+        target = { urn: r.urn, name: "Modelo de ACC", viewableGuid: r.viewableGuid };
+      }
+      await loadModel(target.urn, target.name, target.viewableGuid);
+      generated = true;
+    } catch (e) { showStatus("Error: " + e.message, true); }
+    finally { refreshSteps(); }
+  }
+
+  /* ============================================================
+     VISOR APS
+     ============================================================ */
+  let viewer = null;
+  function initViewer() {
+    return new Promise((resolve, reject) => {
+      if (typeof Autodesk === "undefined") {
+        reject(new Error("No se pudo cargar el visor de Autodesk. Revisa la conexión a internet y recarga la página."));
+        return;
+      }
+      Autodesk.Viewing.Initializer({
+        env: "AutodeskProduction2",
+        api: SETTINGS.region === "EMEA" ? "streamingV2_EU" : "streamingV2",
+        getAccessToken: (cb) => {
+          ensureToken().then((t) => {
+            if (t) cb(t.access_token, Math.max(60, Math.round((t.expires_at - Date.now()) / 1000)));
+          });
+        }
+      }, () => {
+        viewer = new Autodesk.Viewing.GuiViewer3D(byId("forgeViewer"));
+        window.__viewer = viewer;   // acceso para depuración/consultas
+        viewer.start();
+        syncViewerTheme();
+        // Al seleccionar un objeto, abre el panel de propiedades nativo
+        viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, () => {
+          if (viewer.getSelection().length) viewer.getPropertyPanel(true).setVisible(true);
+        });
+        // Botón «Ver todo el modelo» mientras haya algo aislado
+        viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, (e) => {
+          const on = !!(e.nodeIdArray && e.nodeIdArray.length);
+          byId("showAllBtn").hidden = !on;
+          if (!on) clearIsoMarks();
+        });
+        resolve();
+      });
+    });
+  }
+  async function loadModel(urn, name, viewableGuid) {
+    // El visor espera el token para arrancar: sin sesión vigente se quedaría colgado.
+    if (!(await ensureToken())) { refreshSteps(); throw new Error("La sesión expiró. Inicia sesión de nuevo."); }
+    if (!viewer) await initViewer();
+    byId("placeholder").style.display = "none";
+    byId("app").classList.add("has-model");
+    showStatus("Cargando " + name + "…", false, true);
+    Autodesk.Viewing.Document.load("urn:" + urn,
+      (doc) => {
+        const root = doc.getRoot();
+        let node = null;
+        // El viewableGuid de las URLs de ACC (vistas de ViewSets de coordinación) no
+        // mapea limpio al viewable del SDK y dispara un "Sin acceso" engañoso. Se ignora
+        // a propósito: siempre cargamos la geometría por defecto, igual que el árbol.
+        if (!node) node = root.getDefaultGeometry();
+        if (!node) { showStatus("El modelo no tiene geometría visualizable.", true); return; }
+        resetFilters();
+        viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, function onGeom() {
+          viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeom);
+          byId("viewerTools").hidden = false;
+          byId("propsBtn").style.display = "";
+          setNav(false);                      // deja el espacio al modelo
+          buildFilters();
+        });
+        viewer.loadDocumentNode(doc, node);
+        const crumb = byId("modelName");
+        crumb.textContent = name; crumb.title = name; crumb.hidden = false;
+        showStatus("Cargando la geometría de " + name + "…", false, true);
+      },
+      (code, msg) => {
+        if (!viewer.model) {
+          byId("placeholder").style.display = "flex";
+          byId("app").classList.remove("has-model");
+        }
+        generated = false; refreshSteps();
+        if (code === 4 || code === 9) showStatus("El modelo aún se traduce en Autodesk o no tiene derivados. Intenta más tarde.", true);
+        else showStatus("No se pudo cargar (código " + code + "). Si los datos están en Europa, cambia la región en «Configuración de la conexión». " + (msg || ""), true);
+      }
+    );
+  }
+
+  /* ============================================================
+     FILTROS POR NIVEL Y CATEGORÍA
+     ============================================================ */
+  let allDbIds = [];
+  let dbLevel = {}, dbCategory = {};     // dbId -> nombre
+  let levelChecked = {}, catChecked = {}; // nombre -> bool
+
+  function showTool(id) {
+    byId(id).style.display = "";
+    // Con el modelo listo, abre el tablero de avance (el propósito de la app).
+    if (id === "progressBtn" && !byId("dock").classList.contains("open")) openDock("progress");
+  }
+
+  function resetFilters() {
+    allDbIds = []; dbLevel = {}; dbCategory = {}; levelChecked = {}; catChecked = {};
+    byId("lvlList").innerHTML = "";
+    byId("catList").innerHTML = "";
+    openDock(null);
+    ["filterBtn", "propsBtn", "progressBtn"].forEach((id) => { byId(id).style.display = "none"; });
+    byId("viewerTools").hidden = true;
+    byId("showAllBtn").hidden = true;
+    // Estado del tablero de avance (se conservan los assets cargados)
+    allLeafIds = []; matchByCategory = {}; matchByStatus = {}; matchByStorey = {};
+    matchedItems = []; matchedDbSet = new Set(); colorsApplied = false;
+    filterStatusOn = {}; filterCatOn = {};
+    ["ppDash", "ppDashDetail", "ppFilters", "ppDiag"].forEach((id) => {
+      const el = byId(id); el.style.display = "none"; el.innerHTML = "";
+    });
+    const linkSel = byId("ppLinkProp");
+    while (linkSel.options.length > 2) linkSel.remove(2);
+    linkSel.value = "__auto__";
+    byId("ppLinkWrap").style.display = "none";
+    if (assetRows.length) {                     // la leyenda vuelve al recuento de assets
+      renderLegend(statusTally(assetRows), "assets cargados");
+      renderExcelSummary();
+      ppMatchInfo.innerHTML = "Elige la estrategia y pulsa <b>Emparejar y aplicar colores</b>.";
+    }
+  }
+
+  function buildFilters() {
+    const model = viewer.model;
+    if (!model) return;
+    showStatus("Leyendo niveles y categorías…");
+    model.getObjectTree((tree) => {
+      const leaves = [];
+      tree.enumNodeChildren(tree.getRootId(), (id) => {
+        if (tree.getChildCount(id) === 0) leaves.push(id);
+      }, true);
+      allLeafIds = leaves;
+      showTool("progressBtn");
+
+      const propFilter = ["Category",
+        "Base Level", "Nivel base", "Base Constraint", "Restricción inferior", "Restricción base",
+        "Reference Level", "Nivel de referencia",
+        "Schedule Level", "Nivel de planificación",
+        "Level", "Nivel"];
+
+      // Orden de prioridad para elegir EL NIVEL BASE del objeto.
+      // Se queda con la coincidencia de mayor prioridad (índice más bajo).
+      const LEVEL_PRIORITY = [
+        /^base level$/i, /^nivel base$/i,
+        /^base constraint$/i, /^restricci[oó]n (inferior|base)$/i,
+        /^reference level$/i, /^nivel de referencia$/i,
+        /^schedule level$/i, /^nivel de planificaci[oó]n$/i,
+        /^level$/i, /^nivel$/i
+      ];
+
+      model.getBulkProperties(leaves, { propFilter }, (results) => {
+        results.forEach((r) => {
+          let cat, lvl, lvlRank = Infinity;
+          (r.properties || []).forEach((p) => {
+            if (p.displayName === "Category") { cat = p.displayValue; return; }
+            for (let i = 0; i < LEVEL_PRIORITY.length; i++) {
+              if (LEVEL_PRIORITY[i].test(p.displayName)) {
+                const val = p.displayValue;
+                if (i < lvlRank && val !== undefined && val !== null && val !== "") {
+                  lvlRank = i; lvl = val;
+                }
+                break;
+              }
+            }
+          });
+          if (cat || lvl) {
+            allDbIds.push(r.dbId);
+            if (cat) dbCategory[r.dbId] = cat;
+            if (lvl) dbLevel[r.dbId] = lvl;
+          }
+        });
+        renderFilterGroup("lvlList", dbLevel, levelChecked, "lvlCount");
+        renderFilterGroup("catList", dbCategory, catChecked, "catCount");
+        showTool("filterBtn");
+        showStatus("Filtros listos: " + Object.keys(levelChecked).length + " niveles, " +
+                   Object.keys(catChecked).length + " categorías.");
+      }, () => showStatus("No se pudieron leer las propiedades del modelo.", true));
+    });
+  }
+
+  function renderFilterGroup(listId, dbMap, checkedMap, countId) {
+    const counts = {};
+    Object.values(dbMap).forEach((name) => { counts[name] = (counts[name] || 0) + 1; });
+    // Niveles: ordenar por elevación (menor a mayor). Categorías: alfabético.
+    const names = Object.keys(counts).sort((a, b) =>
+      (listId === "lvlList")
+        ? (storeyOrder(a) - storeyOrder(b) || a.localeCompare(b, "es", { numeric: true }))
+        : a.localeCompare(b, "es", { numeric: true }));
+
+    const list = document.getElementById(listId);
+    list.innerHTML = "";
+    document.getElementById(countId).textContent = names.length ? names.length : "";
+
+    if (!names.length) {
+      list.innerHTML = '<div class="fp-empty">No disponible para este modelo.</div>';
+      return;
+    }
+    names.forEach((name) => {
+      checkedMap[name] = true;
+      const row = document.createElement("label");
+      row.className = "fp-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = true;
+      cb.onchange = () => { checkedMap[name] = cb.checked; applyFilters(); };
+      const lbl = document.createElement("span");
+      lbl.className = "lbl"; lbl.textContent = name; lbl.title = name;
+      const n = document.createElement("span");
+      n.className = "n"; n.textContent = counts[name];
+      row.appendChild(cb); row.appendChild(lbl); row.appendChild(n);
+      row._cb = cb; row._name = name;
+      list.appendChild(row);
+    });
+  }
+
+  function applyFilters() {
+    if (!viewer || !viewer.model || !allDbIds.length) return;
+    const show = [], hide = [];
+    allDbIds.forEach((id) => {
+      const lvl = dbLevel[id], cat = dbCategory[id];
+      const lvlOk = (lvl === undefined) ? true : levelChecked[lvl];
+      const catOk = (cat === undefined) ? true : catChecked[cat];
+      if (lvlOk && catOk) show.push(id); else hide.push(id);
+    });
+    viewer.show(show);
+    if (hide.length) viewer.hide(hide);
+  }
+
+  function setGroupAll(group, on) {
+    const map = (group === "level") ? levelChecked : catChecked;
+    const listId = (group === "level") ? "lvlList" : "catList";
+    Object.keys(map).forEach((k) => map[k] = on);
+    document.querySelectorAll("#" + listId + " .fp-item").forEach((row) => { row._cb.checked = on; });
+    applyFilters();
+  }
+
+  // Eventos del panel de filtros
+  byId("filterBtn").onclick = () => toggleDock("filters");
+  byId("propsBtn").onclick = () => {
+    if (!viewer) return;
+    const p = viewer.getPropertyPanel(true);
+    p.setVisible(!p.isVisible());
+  };
+  byId("fpClose").onclick = () => openDock(null);
+  document.querySelectorAll(".fp-sec-head").forEach((h) => {
+    h.onclick = () => {
+      const list = byId(h.dataset.target);
+      list.classList.toggle("collapsed");
+      h.classList.toggle("collapsed", list.classList.contains("collapsed"));
+    };
+  });
+  document.querySelectorAll(".fp-actions a").forEach((a) => {
+    a.onclick = () => setGroupAll(a.dataset.group, a.dataset.all === "1");
+  });
+
+  /* ============================================================
+     AVANCE DE OBRA — Assets de Autodesk Build (match por B3F ID)
+     ============================================================ */
+  const STATUS_COLORS = {            // RGB normalizado 0..1
+    // Paleta validada para daltonismo (antes: #FFD400 / #2D7FF9 / #9B51E0 / #27AE60;
+    // azul y morado se confundían con deuteranopía, y el amarillo no se leía sobre blanco).
+    "Sin iniciar": [0.878, 0.647, 0.000],   // #E0A500 ámbar
+    "Acero":       [0.176, 0.498, 0.976],   // #2D7FF9 azul
+    "Encofrado":   [0.780, 0.294, 0.753],   // #C74BC0 magenta
+    "Vaciado":     [0.122, 0.639, 0.353]    // #1FA35A verde
+  };
+  const STATUS_ORDER  = ["Sin iniciar", "Acero", "Encofrado", "Vaciado"];
+  const STATUS_WEIGHT = { "Sin iniciar": 0, "Acero": 1/3, "Encofrado": 2/3, "Vaciado": 1 };
+  const COLOR_NODATA  = [0.28, 0.33, 0.40];   // gris para elementos sin dato
+
+  // Unidad de cantidad por familia (área para losas, volumen para el resto)
+  const CAT_QTY = {
+    LOSAS: { unit: "m²" }, VIGAS: { unit: "m³" }, COLUMNAS: { unit: "m³" },
+    PILAS: { unit: "m³" }, MUROS: { unit: "m³" }, ESCALERAS: { unit: "m³" }
+  };
+  const CAT_LABEL = {
+    COLUMNAS_TORRE: "Columnas Torre", COLUMNAS_PLATAFORMA: "Columnas Plataforma", COLUMNAS: "Columnas",
+    PILAS_TORRES: "Pilas Torres", PILAS_PLATAFORMA: "Pilas Plataforma", PILAS: "Pilas",
+    LOSAS_TORRE: "Losas Torre", LOSAS_PLATAFORMA: "Losas Plataforma",
+    LOSAS: "Losas", MUROS: "Muros", ESCALERAS: "Escaleras", VIGAS: "Vigas"
+  };
+
+  let assetRows       = [];          // filas uniformes de assets (Excel o ACC)
+  let assetById       = new Map();   // B3F ID (minúsc.) -> fila uniforme (solo con id)
+  let allLeafIds      = [];          // hojas del modelo (se llena en buildFilters)
+  let matchByCategory = {};          // familia  -> [dbId]
+  let matchByStatus   = {};          // estado   -> [dbId]
+  let matchByStorey   = {};          // piso     -> [dbId]
+  let matchedItems    = [];          // items del último emparejamiento
+  let matchedDbSet    = new Set();
+  let colorsApplied   = false;
+  let filterStatusOn  = {}, filterCatOn = {};
+
+  function rgbCss(c) { return `rgb(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)})`; }
+
+  function normStatus(s) {
+    if (s == null) return null;
+    const t = String(s).trim().toLowerCase();
+    if (!t) return null;
+    if (/vaciad/.test(t))                      return "Vaciado";
+    if (/encofrad/.test(t))                    return "Encofrado";
+    if (/acero|hierro|refuerzo|armad/.test(t)) return "Acero";
+    if (/sin\s*inici|no\s*inici|pendiente/.test(t)) return "Sin iniciar";
+    return String(s).trim();
+  }
+  function cleanCat(c) {
+    if (c == null) return null;
+    const s = String(c).replace(/^[^\p{L}\d]+/u, "").trim();
+    return s || String(c).trim();
+  }
+  function toNum(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    let s = String(v).trim().replace(/\s/g, "");
+    if (/,/.test(s) && !/\./.test(s)) s = s.replace(",", ".");
+    else s = s.replace(/,/g, "");
+    const m = s.match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+  function findKey(obj, patterns) {
+    const keys = Object.keys(obj);
+    for (const p of patterns) { const k = keys.find(k => p.test(k)); if (k) return k; }
+    return null;
+  }
+  function fmt(n) {
+    if (n == null) return "—";
+    return (Math.round(n * 10) / 10).toLocaleString("es");
+  }
+
+  /* ---- Normalización portada del visor IFC de Serranía ---- */
+  function normName(v)   { return v == null ? "" : String(v).trim().toUpperCase().replace(/\s+/g, " "); }
+  function normStorey(v) { return v == null ? "" : String(v).trim().toUpperCase().replace(/(\d),(\d)/g, "$1.$2").replace(/\s+/g, " "); }
+  function isPlataformaStorey(s) { s = s || ""; return /-\d+[.,]\d+/.test(s) || /MEZZANINE/i.test(s); }
+  // Las losas de TORRE son las que suben (PISO 1..28). Las de abajo (parqueo PISO 96..99,
+  // MEZZANINE, subniveles con elevación negativa) son PLATAFORMA.
+  function losaSubFamily(storeyName) {
+    const s = normStorey(storeyName);
+    const m = s.match(/PISO\s*(\d+)/);
+    if (m) { const n = +m[1]; return (n >= 1 && n <= 28) ? "LOSAS_TORRE" : "LOSAS_PLATAFORMA"; }
+    return "LOSAS_PLATAFORMA";   // MEZZANINE, subniveles y no-PISO → plataforma
+  }
+  // Reclasifica las losas emparejadas en Torre/Plataforma por GEOMETRÍA:
+  // la "huella" de la torre se define con las losas de pisos altos (PISO 2..28,
+  // sin plataforma). Toda losa cuyo centro caiga dentro de esa huella es de TORRE,
+  // aunque esté en un nivel inferior (asociada a las columnas A,B,B',C).
+  function reclassifyLosasByFootprint(model, items) {
+    const losas = items.filter(it => it.familyBase === "LOSAS");
+    if (!losas.length) return { ok: false, reason: "sin losas" };
+    const tree = model.getInstanceTree && model.getInstanceTree();
+    const fl = model.getFragmentList && model.getFragmentList();
+    if (!tree || !fl || typeof THREE === "undefined") {
+      losas.forEach(li => { li.family = losaSubFamily(li.storeyRaw); });
+      return { ok: false, reason: "sin geometría (fallback por nivel)" };
+    }
+    const boundsOf = (dbId) => {
+      const b = new THREE.Box3(), fb = new THREE.Box3(); let any = false;
+      tree.enumNodeFragments(dbId, (f) => { fl.getWorldBounds(f, fb); b.union(fb); any = true; }, true);
+      return any && isFinite(b.min.x) ? b : null;
+    };
+    losas.forEach(li => { li._b = boundsOf(li.dbId); });
+    const floorNum = (s) => { const m = normStorey(s).match(/PISO\s*(\d+)/); return m ? +m[1] : null; };
+    const seeds = losas.filter(li => { const n = floorNum(li.storeyRaw); return n != null && n >= 2 && n <= 28 && li._b; });
+    const src = seeds.length ? seeds : losas.filter(li => li._b);
+    const fp = new THREE.Box2();
+    src.forEach(li => { fp.expandByPoint(new THREE.Vector2(li._b.min.x, li._b.min.y)); fp.expandByPoint(new THREE.Vector2(li._b.max.x, li._b.max.y)); });
+    const mx = (fp.max.x - fp.min.x) * 0.05, my = (fp.max.y - fp.min.y) * 0.05;
+    fp.min.x -= mx; fp.min.y -= my; fp.max.x += mx; fp.max.y += my;
+    let torre = 0, plat = 0;
+    losas.forEach(li => {
+      if (li._b) {
+        const cx = (li._b.min.x + li._b.max.x) / 2, cy = (li._b.min.y + li._b.max.y) / 2;
+        li.family = fp.containsPoint(new THREE.Vector2(cx, cy)) ? "LOSAS_TORRE" : "LOSAS_PLATAFORMA";
+      } else {
+        li.family = losaSubFamily(li.storeyRaw);
+      }
+      li.family === "LOSAS_TORRE" ? torre++ : plat++;
+      delete li._b;
+    });
+    return { ok: true, torre, plat, seeds: seeds.length };
+  }
+  // Clave de agrupación del tablero: separa losas (Torre/Plataforma); el resto consolidado.
+  function groupKey(it) {
+    return (it.family === "LOSAS_TORRE" || it.family === "LOSAS_PLATAFORMA") ? it.family : it.familyBase;
+  }
+
+  // Categoría del Excel -> token canónico (mismo que el modelo)
+  function normalizeCategory(c) {
+    if (!c) return null;
+    const s = String(c).toUpperCase()
+      .replace(/^🌐\s*/, "")
+      .replace(/[ÁÀÂÄ]/g, "A").replace(/[ÉÈÊË]/g, "E").replace(/[ÍÌÎÏ]/g, "I")
+      .replace(/[ÓÒÔÖ]/g, "O").replace(/[ÚÙÛÜ]/g, "U").replace(/Ñ/g, "N").trim();
+    if (s.includes("PILA") && s.includes("PLATAFORMA")) return "PILAS_PLATAFORMA";
+    if (s.includes("PILA") && s.includes("TORRE"))      return "PILAS_TORRES";
+    if (s.includes("PILA"))                              return "PILAS";
+    if (s.includes("COLUMNA") && s.includes("PLATAFORMA")) return "COLUMNAS_PLATAFORMA";
+    if (s.includes("COLUMNA") && s.includes("TORRE"))      return "COLUMNAS_TORRE";
+    if (s.includes("COLUMNA"))                              return "COLUMNAS";
+    if (s.includes("VIGA"))                                 return "VIGAS";
+    if (s.includes("LOSA"))                                 return "LOSAS";
+    if (s.includes("MURO"))                                 return "MUROS";
+    if (s.includes("ESCALER"))                              return "ESCALERAS";
+    return s.replace(/\s+/g, "_");
+  }
+  // Categoría del modelo (Revit) + nombre + piso -> token canónico.
+  // Las señales EXPLÍCITAS de losa/escalera/muro van primero: en modelos
+  // estructurales una losa puede venir con categoría "Structural Foundations"
+  // (que de otro modo caería en PILAS), pero su nombre/tipo dice "Losa…/Floor…".
+  function canonCategoryFromModel(catName, name, storeyName) {
+    const t = (catName || "").toLowerCase();
+    const nm = (name || "").toLowerCase();
+    const isPlat = isPlataformaStorey(storeyName);
+    if (/floor|slab|suelo|losa|forjado/.test(t) || /losa|slab|floor/.test(nm))     return "LOSAS";
+    if (/stair|escal/.test(t) || /escal/.test(nm))                                 return "ESCALERAS";
+    if (/wall|muro/.test(t) || /muro/.test(nm))                                    return "MUROS";
+    if (/pila/.test(nm) || /foundation|cimentaci|footing|zapata|\bpile\b/.test(t)) return isPlat ? "PILAS_PLATAFORMA" : "PILAS_TORRES";
+    if (/column|columna/.test(t) || /columna|column/.test(nm))                     return isPlat ? "COLUMNAS_PLATAFORMA" : "COLUMNAS_TORRE";
+    if (/framing|beam|viga|member/.test(t) || /viga|beam/.test(nm))                return "VIGAS";
+    return (catName || "OTROS").toUpperCase().replace(/\s+/g, "_");
+  }
+  function familyFromCategoryToken(cat) {
+    if (!cat) return null;
+    const c = String(cat).toUpperCase();
+    if (c.startsWith("PILAS"))     return "PILAS";
+    if (c.startsWith("COLUMNAS"))  return "COLUMNAS";
+    if (c.startsWith("LOSAS"))     return "LOSAS";
+    if (c.startsWith("MUROS"))     return "MUROS";
+    if (c.startsWith("ESCALERAS")) return "ESCALERAS";
+    if (c.startsWith("VIGAS"))     return "VIGAS";
+    return null;
+  }
+  function catLabel(tok) {
+    if (CAT_LABEL[tok]) return CAT_LABEL[tok];
+    if (!tok) return "Otros";
+    return tok.charAt(0) + tok.slice(1).toLowerCase().replace(/_/g, " ");
+  }
+  function strategyLabel(s) {
+    return { auto: "Auto Categoría+Piso", b3f: "B3F ID", name: "Nombre", name_storey: "Nombre+Piso", category: "Categoría" }[s] || s;
+  }
+  // Valor de orden de un piso (menor a mayor): elevación con decimal si existe, si no el primer entero.
+  function storeyOrder(name) {
+    const s = String(name == null ? "" : name);
+    let m = s.match(/-?\d+[.,]\d+/);          // p.ej. -1,45 / -4.45 (elevación)
+    if (m) return parseFloat(m[0].replace(",", "."));
+    m = s.match(/-?\d+/);                       // p.ej. PISO 96, Nivel 5
+    if (m) return parseFloat(m[0]);
+    return Infinity;                            // sin número -> al final
+  }
+
+  // Cantidad (área/volumen) de un item: Excel primero, luego propiedad del modelo
+  function qtyForItem(it) {
+    const fam = it.familyBase;
+    if (!CAT_QTY[fam]) return null;
+    const a = it.asset;
+    if (a) {
+      if (fam === "LOSAS" && a.area > 0) return { value: a.area, unit: "m²" };
+      if (fam === "PILAS" && a.longPila > 0 && a.diamFuste > 0) return { value: Math.PI / 4 * a.diamFuste * a.diamFuste * a.longPila, unit: "m³" };
+      if (a.volume > 0) return { value: a.volume, unit: "m³" };
+    }
+    if (fam === "LOSAS" && it.modelArea > 0) return { value: it.modelArea, unit: "m²" };
+    if (it.modelVol > 0) return { value: it.modelVol, unit: "m³" };
+    return null;
+  }
+
+  // Texto dentro de un segmento de color: casi negro sobre ámbar, blanco en el resto.
+  const STATUS_INK = { "Sin iniciar": "#1c1c1a", "Acero": "#fff", "Encofrado": "#fff", "Vaciado": "#fff" };
+  function statusTally(rows) {
+    const t = {}; rows.forEach((r) => { t[r.status] = (t[r.status] || 0) + 1; }); return t;
+  }
+
+  /* ---- Cargar y parsear el Excel ---- */
+  const xlsxInput   = byId("xlsxInput");
+  const loadXlsxBtn = byId("loadXlsxBtn");
+  const ppInfo      = byId("ppInfo");
+  const ppMatch     = byId("ppMatch");
+  const ppMatchInfo = byId("ppMatchInfo");
+  const ppLegend    = byId("ppLegend");
+  let lastSource = null;         // "acc" | "dc" | "file" — última fuente pedida
+
+  function readAssetFile(f) {
+    lastSource = "file";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: "array", cellDates: true });
+        const info = loadAssetsFromWorkbook(wb);
+        afterAssetsLoaded(`<b>${assetRows.length}</b> assets cargados de «${esc(f.name)}» (hoja «${esc(info.sheetName)}»).`);
+        showStatus("Archivo cargado: " + assetRows.length + " assets.");
+      } catch (err) {
+        showStatus("Error leyendo el archivo: " + err.message, true);
+        ppInfo.textContent = "⚠ " + err.message;
+      }
+    };
+    reader.readAsArrayBuffer(f);
+  }
+  loadXlsxBtn.onclick = () => xlsxInput.click();
+  xlsxInput.onchange = (e) => {
+    const f = e.target.files[0];
+    if (f) readAssetFile(f);
+    xlsxInput.value = "";
+  };
+  // Arrastrar y soltar el Excel/CSV sobre el panel
+  (function () {
+    const body = byId("ppBody");
+    const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    body.addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); body.classList.add("drag"); } });
+    body.addEventListener("dragleave", () => body.classList.remove("drag"));
+    body.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); body.classList.remove("drag");
+      const f = e.dataTransfer.files[0];
+      if (!f) return;
+      if (!/\.(xlsx|xls|csv)$/i.test(f.name)) { showStatus("Formato no admitido. Usa un archivo .xlsx, .xls o .csv.", true); return; }
+      readAssetFile(f);
+    });
+  })();
+
+  // Leyenda de estados: recuento + clic para aislar en el modelo
+  function renderLegend(counts, caption) {
+    ppLegend.innerHTML = `<div class="pp-h">Estado <span>· ${caption}</span></div>` +
+      STATUS_ORDER.map((s) =>
+        `<div class="leg" data-status="${s}" role="button" tabindex="0">
+           <span class="sw" style="background:${rgbCss(STATUS_COLORS[s])}"></span>
+           <span>${s}</span><span class="lc">${(counts[s] || 0).toLocaleString("es")}</span>
+         </div>`).join("");
+    ppLegend.style.display = "block";
+    ppLegend.querySelectorAll(".leg").forEach((el) => {
+      el.onclick = () => {
+        if (!isolateIds(matchByStatus[el.dataset.status], el))
+          showStatus("Aplica colores primero (no hay elementos en ese estado).", false);
+      };
+    });
+  }
+
+  // Refresca la UI del panel tras cargar assets (archivo o ACC)
+  function afterAssetsLoaded(infoHtml) {
+    ppInfo.innerHTML = infoHtml;
+    document.querySelectorAll(".src").forEach((b) => b.classList.toggle("on", b.dataset.src === lastSource));
+    byId("srcDetails").open = false;
+    renderLegend(statusTally(assetRows), "assets cargados");
+    ppMatch.style.display = "block";
+    ppMatchInfo.innerHTML = (viewer && viewer.model)
+      ? "Elige la estrategia y pulsa <b>Emparejar y aplicar colores</b>."
+      : "Genera un visualizador (modelo 3D) para poder emparejar.";
+    renderExcelSummary();   // resumen consolidado por categoría (Losas, Pilas, …) desde los assets
+  }
+
+  /* ---- Cargar assets EN VIVO desde la Assets API de ACC ---- */
+  byId("loadAccBtn").onclick = () => { lastSource = "acc"; loadAssetsFromACC(); };
+  byId("loadDcBtn").onclick  = () => { lastSource = "dc";  loadAssetsFromDataConnector(); };
+
+  /* ---- Cargar assets desde el DATA CONNECTOR de ACC (último extracto completado) ----
+     Data Connector entrega los datos como extractos CSV asíncronos. En vez de crear
+     una extracción nueva (lenta y con permisos de escritura), tomamos el ÚLTIMO job
+     COMPLETADO de la cuenta, descargamos su CSV de assets y lo pasamos por el mismo
+     pipeline del Excel (loadAssetsFromWorkbook). Solo requiere data:read / account:read. */
+  async function resolveAccountId() {
+    if (currentAccountId) return currentAccountId;
+    try {
+      const { data } = await getHubs();
+      const hub = (data || [])[0];
+      if (hub) currentAccountId = String(hub.id).replace(/^b\./, "");
+    } catch (e) { /* sin hubs legibles */ }
+    return currentAccountId;
+  }
+
+  async function loadAssetsFromDataConnector() {
+    if (!getToken()) { showStatus("Inicia sesión con Autodesk primero (paso 1).", true); return; }
+    ppInfo.textContent = "Buscando extractos en el Data Connector…";
+    showStatus("Consultando el Data Connector de ACC…");
+    try {
+      const acc = await resolveAccountId();
+      if (!acc) { showStatus("No pude identificar la cuenta ACC para el Data Connector.", true); ppInfo.textContent = "⚠ Sin cuenta."; return; }
+      const arrOf = (o) => (o && (o.results || o.data || (Array.isArray(o) ? o : []))) || [];
+
+      // 1) Solicitudes de la cuenta — priorizar las que incluyen el grupo "assets"
+      const requests = arrOf(await dcGetRequests(acc));
+      if (!requests.length) { showStatus("La cuenta no tiene solicitudes de Data Connector.", true); ppInfo.textContent = "⚠ Sin solicitudes de Data Connector."; return; }
+      const hasAssets = (r) => Array.isArray(r.serviceGroups) && r.serviceGroups.some(s => /asset/i.test(s));
+      requests.sort((a, b) => (hasAssets(b) ? 1 : 0) - (hasAssets(a) ? 1 : 0));
+
+      // 2) Job COMPLETADO más reciente entre las solicitudes candidatas
+      let best = null;
+      for (const r of requests) {
+        const jobs = arrOf(await dcGetJobs(acc, r.id));
+        jobs.forEach(j => {
+          if (String(j.status || "").toLowerCase() === "complete") {
+            const t = Date.parse(j.completedAt || j.createdAt || j.startDate || "") || 0;
+            if (!best || t > best.t) best = { jobId: j.id, t, req: r };
+          }
+        });
+        if (best && hasAssets(r)) break;   // ya tenemos un extracto de assets reciente
+      }
+      if (!best) { showStatus("No hay extractos completados en el Data Connector todavía.", true); ppInfo.textContent = "⚠ Sin extractos completados."; return; }
+
+      // 3) Listado de archivos del extracto → elegir el CSV de assets
+      showStatus("Leyendo el extracto del Data Connector…");
+      const files = arrOf(await dcGetDataList(acc, best.jobId));
+      const pref = (name) => {
+        const n = String(name || "").toLowerCase();
+        if (!/\.csv$/.test(n) || !/asset/.test(n)) return 0;
+        if (/assets_assets\.csv$|^assets\.csv$/.test(n)) return 3;
+        if (!/categ|status|custom|location|attribute|type/.test(n)) return 2;
+        return 1;
+      };
+      const pick = files.map(f => ({ f, s: pref(f.name) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s)[0];
+      if (!pick) {
+        showStatus("El extracto no contiene un CSV de assets.", true);
+        ppInfo.innerHTML = "⚠ Archivos del extracto: " + (files.map(f => f.name).join(", ") || "—");
+        return;
+      }
+      const fileName = pick.f.name;
+
+      // 4) URL firmada del CSV (válida ~60 s) — puede venir ya en el listado
+      let signedUrl = pick.f.signedUrl || pick.f.url || null;
+      if (!signedUrl) {
+        const dataResp = await dcGetData(acc, best.jobId, fileName);
+        signedUrl = dataResp && (dataResp.signedUrl || dataResp.url);
+      }
+      if (!signedUrl) { showStatus("No obtuve la URL firmada del CSV de assets.", true); return; }
+
+      // 5) Descargar el CSV (sin header de auth: la URL ya está firmada)
+      showStatus("Descargando «" + fileName + "» del Data Connector…");
+      const csvRes = await fetch(signedUrl);
+      if (!csvRes.ok) throw new Error("descarga " + csvRes.status);
+      const csvText = await csvRes.text();
+
+      // 6) Parsear el CSV como libro y reutilizar el pipeline del Excel
+      const wb = XLSX.read(csvText, { type: "string" });
+      loadAssetsFromWorkbook(wb);
+      afterAssetsLoaded(`<b>${assetRows.length}</b> assets cargados del Data Connector<br>Extracto «${fileName}» · job ${String(best.jobId).slice(0, 8)}…`);
+      showStatus("Data Connector: " + assetRows.length + " assets cargados.");
+    } catch (e) {
+      const msg = /Failed to fetch|CORS|NetworkError/i.test(e.message)
+        ? "El navegador bloqueó la descarga del CSV (CORS). Descarga el extracto desde ACC y cárgalo con «Excel o CSV»."
+        : /403/.test(e.message) ? "403: sin permiso de Data Connector o no habilitado en la cuenta."
+        : /404/.test(e.message) ? "404: revisa el ID de cuenta del Data Connector."
+        : e.message;
+      showStatus("Error en Data Connector: " + msg, true);
+      ppInfo.textContent = "⚠ " + msg;
+    }
+  }
+
+  async function loadAssetsFromACC() {
+    if (!getToken())        { showStatus("Inicia sesión con Autodesk primero (paso 1).", true); return; }
+    if (!currentProjectId)  { showStatus("Genera primero un modelo desde una URL/árbol de ACC (así conozco el proyecto).", true); return; }
+    const proj = currentProjectId;
+    ppInfo.textContent = "Consultando Assets API de ACC…";
+    showStatus("Consultando assets de ACC… (proyecto " + proj.slice(0, 8) + "…)");
+    try {
+      const arrOf = (o) => (o && (o.results || o.data || (Array.isArray(o) ? o : []))) || [];
+      let statusMap = {}, catMap = {};
+      try {
+        arrOf(await getAssetStatusSets(proj)).forEach(set => {
+          (set.values || set.statuses || set.statusValues || []).forEach(v => {
+            statusMap[v.id] = v.label || v.name || v.value || v.text || v.id;
+          });
+        });
+      } catch (e) { /* sin status sets legibles */ }
+      try {
+        arrOf(await getAssetCategories(proj)).forEach(c => { catMap[c.id] = c.name || c.title || c.label; });
+      } catch (e) { /* sin categorías legibles */ }
+
+      const all = []; const limit = 200; let offset = 0;
+      while (true) {
+        const page = await getAssetsPage(proj, limit, offset);
+        const arr = arrOf(page);
+        all.push(...arr);
+        const more = (page && page.pagination && typeof page.pagination.totalResults === "number")
+          ? (offset + arr.length) < page.pagination.totalResults
+          : (arr.length === limit);
+        if (!more || arr.length === 0) break;
+        offset += limit;
+        if (offset > 50000) break;
+        showStatus("Descargando assets… " + all.length);
+      }
+      if (!all.length) { showStatus("El proyecto no devolvió assets (¿Assets habilitado / permisos?).", true); ppInfo.textContent = "⚠ Sin assets."; return; }
+      buildAssetMapFromACC(all, statusMap, catMap);
+    } catch (e) {
+      const msg = /403/.test(e.message) ? "403: sin permiso o Assets no habilitado en este proyecto."
+               : /404/.test(e.message) ? "404: projectId incorrecto (revisa que la URL sea de ACC)."
+               : e.message;
+      showStatus("Error en Assets API: " + msg, true);
+      ppInfo.textContent = "⚠ " + msg;
+    }
+  }
+
+  function buildAssetMapFromACC(arr, statusMap, catMap) {
+    const STATES = new Set(STATUS_ORDER);
+    const caOf = (a) => a.customAttributes || a.customAttributeValues || a.customAttribute || {};
+    const tally = {};
+    arr.forEach(a => {
+      if (STATES.has(normStatus(statusMap[a.statusId]))) tally["__status__"] = (tally["__status__"] || 0) + 1;
+      const ca = caOf(a);
+      Object.keys(ca).forEach(k => {
+        const val = ca[k] && typeof ca[k] === "object" ? (ca[k].value || ca[k].label || ca[k].text) : ca[k];
+        if (STATES.has(normStatus(val))) tally[k] = (tally[k] || 0) + 1;
+      });
+    });
+    let stSrc = null, bestScore = 0;
+    Object.keys(tally).forEach(k => { if (tally[k] > bestScore) { bestScore = tally[k]; stSrc = k; } });
+    const statusOf = (a) => {
+      if (stSrc === "__status__" || !stSrc) return statusMap[a.statusId];
+      const v = caOf(a)[stSrc];
+      return v && typeof v === "object" ? (v.value || v.label || v.text) : v;
+    };
+
+    assetRows = []; assetById = new Map();
+    arr.forEach(a => {
+      const idRaw = a.id != null && String(a.id).trim() !== "" ? String(a.id).trim() : null;
+      const catRaw = catMap[a.categoryId] || a.categoryId || null;
+      const loc = a.location && (a.location.name || a.location);
+      const row = {
+        id: idRaw ? idRaw.toLowerCase() : null,
+        status: normStatus(statusOf(a)) || "Sin iniciar",
+        catRaw, catCanon: catRaw ? normalizeCategory(cleanCat(catRaw)) : null,
+        name: a.name || null,
+        storeys: [a.description, a.name, loc],
+        area: null, volume: null, longPila: null, diamFuste: null
+      };
+      assetRows.push(row);
+      if (row.id) assetById.set(row.id, row);
+    });
+
+    const stLabel = stSrc === "__status__" ? "Status del sistema" : stSrc ? "atributo «" + stSrc + "»" : "no detectado";
+    afterAssetsLoaded(`<b>${assetRows.length}</b> assets cargados en vivo desde ACC.<br>Estado leído de: ${stLabel}.`);
+    if (!stSrc) {
+      const diag = document.getElementById("ppDiag");
+      diag.innerHTML = "<b>No reconocí el campo de estado.</b><br>JSON del primer asset (para mapear):<br><code>"
+        + JSON.stringify(arr[0], null, 1).slice(0, 1500).replace(/</g, "&lt;") + "</code>";
+      diag.style.display = "block";
+    }
+    showStatus("" + assetRows.length + " assets desde ACC. Pulsa «Emparejar y aplicar colores».");
+  }
+
+  // Lee el Excel -> filas uniformes (id, estado, categoría, pisos candidatos, cantidades)
+  function loadAssetsFromWorkbook(wb) {
+    const sheetName = wb.SheetNames.find(n => /asset/i.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+    if (!rows.length) throw new Error("La hoja '" + sheetName + "' está vacía.");
+    const s = rows[0];
+    const kId   = findKey(s, [/b3f/i, /asset.*id/i, /^id$/i]);
+    const kSt   = findKey(s, [/status|estado/i]);
+    const kCat  = findKey(s, [/categor/i]);
+    const kArea = findKey(s, [/area\s*losa|area|área/i]);
+    const kVol  = findKey(s, [/volum/i]);
+    const kName = findKey(s, [/^name$|nombre/i]);
+    const kDesc = findKey(s, [/descrip/i]);
+    if (!kId) throw new Error("No encontré la columna 'B3F ID' en el Excel.");
+    assetRows = []; assetById = new Map();
+    rows.forEach(r => {
+      const idRaw = r[kId] != null && String(r[kId]).trim() !== "" ? String(r[kId]).trim() : null;
+      const catRaw = kCat ? r[kCat] : null;
+      const row = {
+        id: idRaw ? idRaw.toLowerCase() : null,
+        status: normStatus(kSt ? r[kSt] : null) || "Sin iniciar",
+        catRaw, catCanon: catRaw != null ? normalizeCategory(cleanCat(catRaw)) : null,
+        name: kName ? r[kName] : null,
+        // candidatos de piso (igual que el visor IFC): Description, Name, Location, Nivel, 🖼️ Nivel, Nivel Elemento
+        storeys: [kDesc ? r[kDesc] : null, kName ? r[kName] : null,
+                  r["Location"], r["Nivel"], r["🖼️ Nivel"], r["Nivel Elemento"]],
+        area:   kArea ? toNum(r[kArea]) : null,
+        volume: kVol  ? toNum(r[kVol])  : null,
+        longPila:  toNum(r["Longitud Pila"]),
+        diamFuste: toNum(r["Diámetro Fuste"])
+      };
+      assetRows.push(row);
+      if (row.id) assetById.set(row.id, row);
+    });
+    if (!assetRows.length) throw new Error("No se leyó ninguna fila de assets.");
+    return { sheetName };
+  }
+
+  /* ============================================================
+     EMPAREJAMIENTO (varias estrategias, portado del visor IFC)
+     ============================================================ */
+  const GUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  function guidsIn(val) {
+    if (val == null) return [];
+    const m = String(val).toLowerCase().match(GUID_RE);
+    return m || [];
+  }
+
+  // ¿Un valor tiene pinta de piso/nivel? (descarta tipos de losa "Losa_Concreto_80mm" y ejes "A-2")
+  function looksLikeStorey(v) {
+    const s = normStorey(v); if (!s) return false;
+    return /piso|nivel|mezzanine|s[OÓ]TANO|level|planta|terraza|cubierta|azotea/i.test(s)
+        || /-?\d+[.,]\d+/.test(s) || /^-?\d+$/.test(s);
+  }
+  function storeyFromRow(row, validStoreys) {
+    // 1) un candidato que sea un piso REAL del modelo
+    for (const c of row.storeys) { const x = normStorey(c); if (x && validStoreys.has(x)) return x; }
+    // 2) un candidato con forma de piso (evita usar el tipo de losa o el eje)
+    for (const c of row.storeys) { if (looksLikeStorey(c)) return normStorey(c); }
+    return null;
+  }
+  function keyForRow(strategy, row, validStoreys) {
+    if (strategy === "auto") {
+      const cat = row.catCanon; if (!cat) return null;
+      const storey = storeyFromRow(row, validStoreys);
+      if (!storey) return null;
+      return "CS|" + cat + "|" + storey;
+    }
+    if (strategy === "category") return row.catCanon ? "C|" + row.catCanon : null;
+    const n = normName(row.name); if (!n) return null;
+    if (strategy === "name") return "N|" + n;
+    // name_storey
+    let s = ""; for (const c of row.storeys) { const x = normStorey(c); if (x) { s = x; break; } }
+    return "NS|" + n + "|" + s;
+  }
+  function keyForModel(strategy, e) {
+    if (strategy === "category") return "C|" + e.canonCat;
+    if (strategy === "auto")     return "CS|" + e.canonCat + "|" + e.storey;
+    if (strategy === "name")     return e.nameNorm ? "N|" + e.nameNorm : null;
+    if (strategy === "name_storey") return e.nameNorm ? "NS|" + e.nameNorm + "|" + e.storey : null;
+    return null;
+  }
+  function makeItem(e, status, assetRow) {
+    return {
+      dbId: e.dbId, status, family: e.canonCat,
+      familyBase: familyFromCategoryToken(e.canonCat) || e.canonCat,
+      storeyRaw: e.storeyRaw || "(sin nivel)",
+      asset: assetRow, modelArea: e.area, modelVol: e.vol
+    };
+  }
+
+  // Estrategia estadística — reparte filas Excel sobre elementos (round-robin).
+  // 'auto' usa 2 pasadas: 1) Categoría+Piso (CS), 2) respaldo solo Categoría (C)
+  // para los elementos/filas que no cruzaron por piso (p.ej. losas con nivel distinto).
+  function buildMatchCategorical(strategy, elem) {
+    const validStoreys = new Set(elem.map(e => e.storey).filter(Boolean));
+    const rowKey   = (pass, row) => pass === 1 ? (row.catCanon ? "C|" + row.catCanon : null) : keyForRow(strategy, row, validStoreys);
+    const modelKey = (pass, e)   => pass === 1 ? "C|" + e.canonCat : keyForModel(strategy, e);
+    const passes   = strategy === "auto" ? [0, 1] : [0];
+
+    const items = []; let common = 0, egSize = 0, igSize = 0;
+    const usedEls = new Set(), usedRows = new Set();
+
+    passes.forEach((pass, pIdx) => {
+      const eg = new Map();
+      assetRows.forEach((row, ri) => { if (usedRows.has(ri)) return; const k = rowKey(pass, row); if (!k) return; if (!eg.has(k)) eg.set(k, []); eg.get(k).push(ri); });
+      const ig = new Map();
+      elem.forEach((e, ei) => { if (usedEls.has(ei)) return; const k = modelKey(pass, e); if (!k) return; if (!ig.has(k)) ig.set(k, []); ig.get(k).push(ei); });
+      if (pIdx === 0) { egSize = eg.size; igSize = ig.size; }
+
+      for (const [k, rowIdxs] of eg) {
+        const elIdxs = ig.get(k); if (!elIdxs || !elIdxs.length) continue;
+        common++;
+        const sc = {}; rowIdxs.forEach(ri => { const s = assetRows[ri].status; if (s) sc[s] = (sc[s] || 0) + 1; });
+        const modal = Object.entries(sc).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+        for (let i = 0; i < elIdxs.length; i++) {
+          const ei = elIdxs[i];
+          const ri = i < rowIdxs.length ? rowIdxs[i] : null;
+          const status = ri != null ? assetRows[ri].status : modal;
+          usedEls.add(ei);
+          if (ri != null) usedRows.add(ri);
+          if (!status) continue;
+          items.push(makeItem(elem[ei], status, ri != null ? assetRows[ri] : null));
+        }
+      }
+    });
+    return { items, common, egSize, igSize };
+  }
+
+  // Estrategia B3F ID 1:1 (con auto-detección de la propiedad de enlace por GUID)
+  function buildMatchB3F(elem, propNames) {
+    const idSet = new Set(assetById.keys());
+    populateLinkSelector(propNames);
+    const tally = {};
+    const test = (src, val) => { for (const g of guidsIn(val)) { if (idSet.has(g)) { tally[src] = (tally[src] || 0) + 1; break; } } };
+    elem.forEach(e => { test("__externalId__", e.externalId); e.props.forEach(p => test(p.name, p.val)); });
+    const manual = document.getElementById("ppLinkProp").value;
+    let src = null;
+    if (manual && manual !== "__auto__") src = manual;
+    else { let bs = 0; Object.keys(tally).forEach(k => { if (tally[k] > bs) { bs = tally[k]; src = k; } }); }
+    const items = [];
+    if (src) {
+      const valOf = (e) => src === "__externalId__" ? e.externalId : (e.props.find(p => p.name === src) || {}).val;
+      elem.forEach(e => { let a = null; for (const g of guidsIn(valOf(e))) { if (idSet.has(g)) { a = assetById.get(g); break; } } if (a) items.push(makeItem(e, a.status, a)); });
+    }
+    const srcLabel = src === "__externalId__" ? "ID externo (Revit UniqueId)" : src ? "propiedad «" + src + "»" : "—";
+    return { items, srcLabel };
+  }
+
+  byId("applyColorsBtn").onclick = applyStatusColors;
+  byId("clearColorsBtn").onclick = () => {
+    if (viewer && viewer.model) { viewer.clearThemingColors(viewer.model); if (viewer.showAll) viewer.showAll(); }
+    colorsApplied = false;
+    clearIsoMarks();
+    showStatus("Colores retirados. Se muestra el modelo completo.");
+  };
+  // Cambiar de estrategia oculta el selector de propiedad (solo aplica a B3F)
+  byId("ppStrategy").onchange = () => {
+    if (byId("ppStrategy").value !== "b3f") byId("ppLinkWrap").style.display = "none";
+  };
+
+  function applyStatusColors() {
+    if (!viewer || !viewer.model) { showStatus("Genera un modelo 3D primero (paso 3).", true); return; }
+    if (!assetRows.length)        { showStatus("Carga primero los assets (ACC, Data Connector o archivo).", true); return; }
+    if (!allLeafIds.length)       { showStatus("El modelo aún lee su estructura, espera un momento.", true); return; }
+    const strategy = document.getElementById("ppStrategy").value;
+    showStatus("Leyendo propiedades del modelo y emparejando (" + strategyLabel(strategy) + ")…");
+
+    const model = viewer.model;
+    const opts = { needsExternalId: true };
+    const fn = model.getBulkProperties2
+      ? (cb, err) => model.getBulkProperties2(allLeafIds, opts, cb, err)
+      : (cb, err) => model.getBulkProperties(allLeafIds, opts, cb, err);
+    fn((results) => {
+      const propNames = new Set();
+      const elem = results.map(r => {
+        const props = (r.properties || []).map(p => ({ name: p.displayName, val: p.displayValue }));
+        let area = null, vol = null, catRaw = null, typeName = null;
+        props.forEach(p => {
+          propNames.add(p.name);
+          if (p.name === "Category" && catRaw == null) catRaw = p.val;
+          // Tipo del elemento: "Type Name", "Tipo", "Nombre de tipo", "Original Type"/"Tipo original", "Family Name"…
+          if (typeName == null && /type\s*name|^type$|^tipo$|nombre de tipo|family name|nombre de familia|original\s*type|tipo\s*original/i.test(p.name)) typeName = p.val;
+          if (/^volume$|^volumen/i.test(p.name) && vol  == null) vol  = toNum(p.val);
+          if (/^area$|^área$/i.test(p.name)      && area == null) area = toNum(p.val);
+        });
+        const cat   = (dbCategory[r.dbId] != null ? dbCategory[r.dbId] : catRaw);
+        const lvl   = (dbLevel[r.dbId] != null ? dbLevel[r.dbId] : "");
+        const name  = r.name || "";
+        // Para clasificar la categoría combinamos nombre + tipo (p.ej. tipo "Losa_Concreto_80mm" → Losa)
+        const nameForCat = [name, typeName].filter(Boolean).join(" ");
+        return {
+          dbId: r.dbId, externalId: r.externalId, props, area, vol,
+          name, typeName, nameNorm: normName(name),
+          canonCat: canonCategoryFromModel(cat, nameForCat, lvl),
+          storey: normStorey(lvl), storeyRaw: lvl || "(sin nivel)"
+        };
+      });
+
+      let items = [], info = "";
+      if (strategy === "b3f") {
+        const res = buildMatchB3F(elem, propNames);
+        items = res.items;
+        info = `B3F ID por ${res.srcLabel} · <b>${items.length}</b>/${elem.length} elementos.`;
+      } else {
+        const res = buildMatchCategorical(strategy, elem);
+        items = res.items;
+        info = `Estrategia <b>${strategyLabel(strategy)}</b> · ${res.common} claves comunes (${res.egSize} Excel / ${res.igSize} modelo) · <b>${items.length}</b>/${elem.length} elementos.`;
+      }
+
+      if (!items.length) {
+        colorsApplied = false;
+        renderDiagnostic(elem, strategy);
+        ppMatchInfo.innerHTML = "⚠ 0 coincidencias con «" + strategyLabel(strategy) + "». Revisa el diagnóstico o prueba otra estrategia.";
+        showStatus("0 coincidencias. Prueba la estrategia «Auto · Categoría+Piso» o revisa el diagnóstico.", true);
+        return;
+      }
+      applyColorsAndDash(items, elem, info);
+      if (strategy !== "b3f") renderCategoryBreakdown(elem, items);
+      else document.getElementById("ppDiag").style.display = "none";
+    }, () => showStatus("No se pudieron leer las propiedades del modelo.", true));
+  }
+
+  // Desglose: cuántos elementos del modelo hay por categoría y cuántos se emparejaron
+  function renderCategoryBreakdown(elem, items) {
+    const modelCats = {}, matchedCats = {};
+    elem.forEach(e => { const f = familyFromCategoryToken(e.canonCat) || e.canonCat; modelCats[f] = (modelCats[f] || 0) + 1; });
+    items.forEach(it => { matchedCats[it.familyBase] = (matchedCats[it.familyBase] || 0) + 1; });
+    const fams = Object.keys(modelCats).sort((a, b) => modelCats[b] - modelCats[a]);
+    let html = `<b>Modelo vs emparejados por categoría</b><br>`;
+    fams.forEach(f => {
+      const m = modelCats[f], k = matchedCats[f] || 0;
+      const warn = (k === 0 && m > 0) ? " ⚠" : "";
+      html += `· ${catLabel(f)}: <b>${k}</b>/${m} emparejados${warn}<br>`;
+    });
+    const noModel = Object.keys(matchedCats).filter(f => !modelCats[f]);
+    html += `<br>Categorías del modelo: ${fams.map(catLabel).join(", ") || "—"}.`;
+    const diag = document.getElementById("ppDiag");
+    diag.innerHTML = html;
+    diag.style.display = "block";
+  }
+
+  function applyColorsAndDash(items, elem, info) {
+    matchByCategory = {}; matchByStatus = {}; matchByStorey = {};
+    matchedItems = items; matchedDbSet = new Set();
+    // Separar losas Torre/Plataforma por huella geométrica de la torre
+    reclassifyLosasByFootprint(viewer.model, items);
+    items.forEach(it => {
+      matchedDbSet.add(it.dbId);
+      const gk = groupKey(it);
+      (matchByCategory[gk] = matchByCategory[gk] || []).push(it.dbId);
+      // agregado por familia base (p.ej. "LOSAS" = Torre+Plataforma) para el resumen Excel
+      if (gk !== it.familyBase) (matchByCategory[it.familyBase] = matchByCategory[it.familyBase] || []).push(it.dbId);
+      (matchByStatus[it.status]       = matchByStatus[it.status]       || []).push(it.dbId);
+      (matchByStorey[it.storeyRaw]    = matchByStorey[it.storeyRaw]    || []).push(it.dbId);
+    });
+
+    viewer.clearThemingColors(viewer.model);
+    items.forEach(it => {
+      const c = STATUS_COLORS[it.status]; if (!c) return;
+      viewer.setThemingColor(it.dbId, new THREE.Vector4(c[0], c[1], c[2], 1), viewer.model, true);
+    });
+    // Gris para elementos del modelo sin dato del Excel
+    const nd = COLOR_NODATA;
+    elem.forEach(e => { if (!matchedDbSet.has(e.dbId)) viewer.setThemingColor(e.dbId, new THREE.Vector4(nd[0], nd[1], nd[2], 1), viewer.model, true); });
+    colorsApplied = true;
+
+    filterStatusOn = {}; STATUS_ORDER.forEach(s => filterStatusOn[s] = true);
+    filterCatOn = {}; [...new Set(items.map(groupKey))].forEach(f => filterCatOn[f] = true);
+
+    ppMatchInfo.innerHTML = info;
+    renderExcelSummary();
+    renderDashboard(items, elem.length);
+    renderFilters();
+    showStatus("" + items.length + " elementos emparejados y coloreados.");
+  }
+
+  function populateLinkSelector(propNames) {
+    const sel = document.getElementById("ppLinkProp");
+    const cur = sel.value;
+    while (sel.options.length > 2) sel.remove(2);
+    [...propNames].sort((a, b) => a.localeCompare(b, "es")).forEach(n => {
+      const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+    });
+    sel.value = [...sel.options].some(o => o.value === cur) ? cur : "__auto__";
+    if (document.getElementById("ppStrategy").value === "b3f") document.getElementById("ppLinkWrap").style.display = "block";
+  }
+
+  function renderDiagnostic(elem, strategy) {
+    const diag = document.getElementById("ppDiag");
+    let html = `<b>Diagnóstico (${strategyLabel(strategy)})</b><br>`;
+    if (strategy === "b3f") {
+      const idSet = new Set(assetById.keys());
+      const found = new Set();
+      elem.forEach(e => { guidsIn(e.externalId).forEach(g => found.add(g)); e.props.forEach(p => guidsIn(p.val).forEach(g => found.add(g))); });
+      const overlap = [...found].filter(g => idSet.has(g)).length;
+      html += `B3F ID de ejemplo:<br>` + [...assetById.values()].slice(0, 3).map(a => `· <code>${a.id}</code>`).join("<br>") + `<br><br>`;
+      html += `GUID en el modelo: <b>${found.size}</b> · que están en los assets: <b>${overlap}</b>.<br><br>`;
+      const s = elem[0];
+      if (s) {
+        html += `Objeto de ejemplo (dbId ${s.dbId}):<br>· <b>ID externo</b>: <code>${s.externalId || "—"}</code><br>`;
+        s.props.slice(0, 20).forEach(p => { html += `· ${p.name}: <code>${p.val == null ? "" : String(p.val).slice(0, 50)}</code><br>`; });
+      }
+      html += `<br>Si no hay solape, usa la estrategia <b>Auto · Categoría+Piso</b>.`;
+    } else {
+      const cats = {}, sto = {};
+      assetRows.forEach(r => { if (r.catCanon) cats[r.catCanon] = (cats[r.catCanon] || 0) + 1; });
+      const mCats = {}, mSto = {};
+      elem.forEach(e => { mCats[e.canonCat] = (mCats[e.canonCat] || 0) + 1; mSto[e.storeyRaw] = (mSto[e.storeyRaw] || 0) + 1; });
+      html += `<b>Categorías Excel:</b> ${Object.keys(cats).join(", ") || "—"}<br><br>`;
+      html += `<b>Categorías modelo:</b> ${Object.keys(mCats).join(", ") || "—"}<br><br>`;
+      html += `<b>Pisos del modelo:</b> ${Object.keys(mSto).slice(0, 15).join(" · ") || "—"}<br><br>`;
+      html += `Si las categorías no coinciden, ajusta el diccionario; si los pisos difieren, prueba «Categoría (agregado)».`;
+    }
+    diag.innerHTML = html;
+    diag.style.display = "block";
+  }
+
+  /* ============================================================
+     RESUMEN POR CATEGORÍA SEGÚN LOS ASSETS (consolidado, independiente del modelo)
+     Garantiza ver Losas (m²) y Pilas (m³) aunque el modelo no empareje todo.
+     ============================================================ */
+  function excelSummaryByFamily() {
+    const fams = {};
+    assetRows.forEach(r => {
+      const fam = familyFromCategoryToken(r.catCanon);
+      if (!fam) return;
+      const f = fams[fam] = fams[fam] || { total: 0, st: {}, qty: 0, qtyVac: 0, unit: (CAT_QTY[fam] || {}).unit || null };
+      f.total++; f.st[r.status] = (f.st[r.status] || 0) + 1;
+      let v = null;
+      if (fam === "LOSAS" && r.area > 0) v = r.area;
+      else if (fam === "PILAS") { v = (r.longPila > 0 && r.diamFuste > 0) ? Math.PI / 4 * r.diamFuste * r.diamFuste * r.longPila : (r.volume > 0 ? r.volume : null); }
+      else if (r.volume > 0) v = r.volume;
+      if (v != null) { f.qty += v; if (r.status === "Vaciado") f.qtyVac += v; }
+    });
+    return fams;
+  }
+
+  function renderExcelSummary() {
+    const wrap = byId("ppExcelSum");
+    if (!assetRows.length) { wrap.style.display = "none"; return; }
+    const fams = excelSummaryByFamily();
+    const ORDER = ["LOSAS", "PILAS", "COLUMNAS", "MUROS", "VIGAS", "ESCALERAS"];
+    const names = Object.keys(fams).sort((a, b) => ((ORDER.indexOf(a) + 1) || 99) - ((ORDER.indexOf(b) + 1) || 99));
+    if (!names.length) { wrap.style.display = "none"; return; }
+    let html = `<div class="pp-h">Por categoría <span>· según los assets cargados</span></div>`;
+    names.forEach(fam => {
+      const f = fams[fam];
+      const vac = f.st["Vaciado"] || 0;
+      const cp = Math.round(100 * vac / f.total);
+      const q = (f.qty > 0) ? ` · ${fmt(f.qtyVac)} / ${fmt(f.qty)} ${f.unit} (${Math.round(100 * f.qtyVac / f.qty)}%)` : "";
+      html += `<div class="cat" data-iso="cat:${fam}" role="button" tabindex="0">
+        <div class="cat-top"><span class="cat-name">${catLabel(fam)}</span><span class="cat-pct">${cp}%</span></div>
+        <div class="seg thin">${segBar(f.st, f.total)}</div>
+        <div class="cat-meta">${f.total} assets · vaciado ${vac}/${f.total}${q}</div></div>`;
+    });
+    wrap.innerHTML = html;
+    wrap.style.display = "block";
+    wrap.querySelectorAll(".cat").forEach(el => {
+      el.onclick = () => { isolateIds(matchByCategory[el.dataset.iso.split(":")[1]], el); };
+    });
+  }
+
+  /* ============================================================
+     TABLERO DE INDICADORES (recuento, %, área/volumen, por categoría y por piso)
+     ============================================================ */
+  // Barra segmentada por estado. Las partes se separan con 2 px de superficie.
+  function segBar(stCount, total, tall) {
+    return STATUS_ORDER.map(s => {
+      const n = stCount[s] || 0; if (!n) return "";
+      const pct = Math.round(100 * n / total);
+      const label = (tall && n / total >= 0.12) ? `<i style="color:${STATUS_INK[s]}">${pct}%</i>` : "";
+      return `<span style="flex:${n} 1 0;background:${rgbCss(STATUS_COLORS[s])}" data-tip="${s}: ${n.toLocaleString("es")} (${pct}%)">${label}</span>`;
+    }).join("");
+  }
+  function meterRow(label, done, total, unit) {
+    const p = Math.round(100 * done / total);
+    return `<div><div class="meter-top"><span>${label}</span><b>${fmt(done)} / ${fmt(total)} ${unit} · ${p}%</b></div>
+      <div class="meter"><span style="width:${Math.min(100, 100 * done / total)}%"></span></div></div>`;
+  }
+
+  function renderDashboard(items, leafCount) {
+    const dash = byId("ppDash"), detail = byId("ppDashDetail");
+    const total = items.length;
+    if (!total) { dash.style.display = "none"; detail.style.display = "none"; return; }
+
+    const st = {}; let wsum = 0, areaTot = 0, areaVac = 0, volTot = 0, volVac = 0;
+    const cats = {}, sts = {};
+    items.forEach(it => {
+      st[it.status] = (st[it.status] || 0) + 1;
+      wsum += STATUS_WEIGHT[it.status] || 0;
+      const q = qtyForItem(it);
+      const gk = groupKey(it);
+      const c = cats[gk] = cats[gk] || { total: 0, st: {}, w: 0, area: 0, areaVac: 0, vol: 0, volVac: 0 };
+      c.total++; c.st[it.status] = (c.st[it.status] || 0) + 1; c.w += STATUS_WEIGHT[it.status] || 0;
+      const sk = sts[it.storeyRaw] = sts[it.storeyRaw] || { total: 0, st: {}, w: 0 };
+      sk.total++; sk.st[it.status] = (sk.st[it.status] || 0) + 1; sk.w += STATUS_WEIGHT[it.status] || 0;
+      if (q) {
+        if (q.unit === "m²") { areaTot += q.value; c.area += q.value; if (it.status === "Vaciado") { areaVac += q.value; c.areaVac += q.value; } }
+        else                 { volTot  += q.value; c.vol  += q.value; if (it.status === "Vaciado") { volVac  += q.value; c.volVac  += q.value; } }
+      }
+    });
+    const pct = Math.round(100 * wsum / total);
+    const unmatched = (leafCount || total) - total;
+    const vacN = st["Vaciado"] || 0;
+
+    // ---- Indicador principal ----
+    let html = `<div class="hero">
+      <div class="hero-top">
+        <div><div class="pp-h" style="margin:0">Avance ponderado</div>
+             <div class="hero-num">${pct}<small>%</small></div></div>
+        <div class="hero-side"><b>${total.toLocaleString("es")}</b> elementos emparejados<br>
+             <b>${vacN.toLocaleString("es")}</b> vaciados (${Math.round(100 * vacN / total)}%)${unmatched > 0 ? `<br>${unmatched.toLocaleString("es")} sin dato` : ""}</div>
+      </div>
+      <div class="seg tall">${segBar(st, total, true)}</div>`;
+    if (areaTot || volTot) {
+      html += `<div class="meters">`;
+      if (areaTot) html += meterRow("Área vaciada", areaVac, areaTot, "m²");
+      if (volTot)  html += meterRow("Volumen vaciado", volVac, volTot, "m³");
+      html += `</div>`;
+    }
+    html += `<p class="hint">Cada elemento pesa según su etapa: Acero ⅓ · Encofrado ⅔ · Vaciado 1.</p></div>`;
+    dash.innerHTML = html;
+    dash.style.display = "block";
+    renderLegend(st, "elementos del modelo · clic para aislar");
+
+    // ---- Por categoría ----
+    let d = `<div class="sec"><div class="pp-h">Por categoría <span>· % vaciado · clic para aislar</span></div>`;
+    Object.keys(cats).sort((a, b) => cats[b].total - cats[a].total).forEach(fam => {
+      const c = cats[fam];
+      const vac = c.st["Vaciado"] || 0;
+      const cp = Math.round(100 * vac / c.total);          // % de avance = elementos vaciados / total
+      let q = "";
+      if (c.area)      q = ` · ${fmt(c.areaVac)} / ${fmt(c.area)} m² (${Math.round(100 * c.areaVac / c.area)}%)`;
+      else if (c.vol)  q = ` · ${fmt(c.volVac)} / ${fmt(c.vol)} m³ (${Math.round(100 * c.volVac / c.vol)}%)`;
+      d += `<div class="cat" data-iso="cat:${fam}" role="button" tabindex="0">
+        <div class="cat-top"><span class="cat-name" title="${catLabel(fam)}">${catLabel(fam)}</span><span class="cat-pct">${cp}%</span></div>
+        <div class="seg thin">${segBar(c.st, c.total)}</div>
+        <div class="cat-meta">${c.total} elem · vaciado ${vac}/${c.total}${q}</div></div>`;
+    });
+    d += `</div>`;
+
+    // ---- Por piso ----
+    d += `<div class="sec"><div class="pp-h">Por piso <span>· menor → mayor · % vaciado</span></div>`;
+    Object.keys(sts).sort((a, b) => storeyOrder(a) - storeyOrder(b) || String(a).localeCompare(String(b), "es", { numeric: true })).forEach(name => {
+      const c = sts[name];
+      const vac = c.st["Vaciado"] || 0;
+      const cp = Math.round(100 * vac / c.total);
+      d += `<div class="cat floor" data-iso="storey:${esc(name)}" role="button" tabindex="0" title="${esc(name)} · ${c.total} elem · vaciado ${vac}/${c.total}">
+        <span class="cat-name">${esc(name)}</span>
+        <div class="seg thin">${segBar(c.st, c.total)}</div>
+        <span class="cat-pct">${cp}%</span></div>`;
+    });
+    d += `</div>`;
+
+    detail.innerHTML = d;
+    detail.style.display = "block";
+    detail.querySelectorAll(".cat").forEach(el => {
+      el.onclick = () => {
+        const [kind, key] = el.dataset.iso.split(/:(.+)/);
+        isolateIds(kind === "cat" ? matchByCategory[key] : matchByStorey[key], el);
+      };
+    });
+  }
+
+  /* ============================================================
+     FILTROS UX (chips por estado/categoría + presets)
+     ============================================================ */
+  function renderFilters() {
+    const wrap = document.getElementById("ppFilters");
+    let h = `<div class="pp-h">Filtros · estado</div><div class="chips">`;
+    STATUS_ORDER.forEach(s => {
+      const n = (matchByStatus[s] || []).length; if (!n && !filterStatusOn[s]) {}
+      h += `<span class="chip${filterStatusOn[s] ? " on" : ""}" data-st="${s}" style="--c:${rgbCss(STATUS_COLORS[s])}">${s} ${n}</span>`;
+    });
+    h += `</div>`;
+    h += `<div class="pp-h" style="margin-top:10px">Filtros · categoría</div><div class="chips">`;
+    [...new Set(matchedItems.map(groupKey))].sort().forEach(f => {
+      h += `<span class="chip${filterCatOn[f] ? " on" : ""}" data-cat="${f}">${catLabel(f)} ${(matchByCategory[f]||[]).length}</span>`;
+    });
+    h += `</div>`;
+    h += `<div class="chips" style="margin-top:10px">`
+       + `<span class="chip preset" data-preset="vaciado">Solo Vaciado</span>`
+       + `<span class="chip preset" data-preset="proceso">En proceso</span>`
+       + `<span class="chip preset" data-preset="sin">Sin iniciar</span>`
+       + `<span class="chip preset" data-preset="all">Ver todo</span></div>`;
+    wrap.innerHTML = h;
+    wrap.style.display = "block";
+    wrap.querySelectorAll("[data-st]").forEach(el => el.onclick = () => { filterStatusOn[el.dataset.st] = !filterStatusOn[el.dataset.st]; el.classList.toggle("on"); applyVisibilityFilter(); });
+    wrap.querySelectorAll("[data-cat]").forEach(el => el.onclick = () => { filterCatOn[el.dataset.cat] = !filterCatOn[el.dataset.cat]; el.classList.toggle("on"); applyVisibilityFilter(); });
+    wrap.querySelectorAll("[data-preset]").forEach(el => el.onclick = () => applyPreset(el.dataset.preset));
+  }
+
+  function applyVisibilityFilter() {
+    if (!viewer || !viewer.model) return;
+    const show = [], hide = [];
+    matchedItems.forEach(it => {
+      const ok = filterStatusOn[it.status] !== false && filterCatOn[groupKey(it)] !== false;
+      (ok ? show : hide).push(it.dbId);
+    });
+    if (show.length) viewer.show(show);
+    if (hide.length) viewer.hide(hide);
+  }
+
+  function applyPreset(p) {
+    STATUS_ORDER.forEach(s => filterStatusOn[s] = false);
+    Object.keys(filterCatOn).forEach(f => filterCatOn[f] = true);
+    if (p === "vaciado")      filterStatusOn["Vaciado"] = true;
+    else if (p === "proceso") { filterStatusOn["Acero"] = true; filterStatusOn["Encofrado"] = true; }
+    else if (p === "sin")     filterStatusOn["Sin iniciar"] = true;
+    else { STATUS_ORDER.forEach(s => filterStatusOn[s] = true); if (viewer && viewer.showAll) viewer.showAll(); }
+    renderFilters();
+    if (p !== "all") applyVisibilityFilter();
+  }
+
+  /* ============================================================
+     AISLAR / VER TODO
+     ============================================================ */
+  function clearIsoMarks() {
+    document.querySelectorAll(".is-iso").forEach((n) => n.classList.remove("is-iso"));
+  }
+  function isolateIds(ids, el) {
+    if (!ids || !ids.length || !viewer) return false;
+    viewer.isolate(ids); viewer.fitToView(ids);
+    clearIsoMarks();
+    if (el) el.classList.add("is-iso");
+    return true;
+  }
+  byId("showAllBtn").onclick = () => {
+    if (!viewer || !viewer.model) return;
+    if (matchedItems.length) applyPreset("all"); else viewer.showAll();
+    setGroupAll("level", true); setGroupAll("category", true);
+    viewer.fitToView();
+    clearIsoMarks();
+    byId("showAllBtn").hidden = true;
+  };
+  // Filas con role="button": activables con Enter / Espacio
+  document.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches('.dock [role="button"]')) {
+      e.preventDefault(); e.target.click();
+    }
+  });
+
+  /* ============================================================
+     PANELES, TEMA, AVISOS
+     ============================================================ */
+  function openDock(name) {
+    const d = byId("dock");
+    if (name) { d.classList.add("open"); d.dataset.pane = name; }
+    else { d.classList.remove("open"); delete d.dataset.pane; }
+    byId("progressBtn").classList.toggle("active", name === "progress");
+    byId("filterBtn").classList.toggle("active", name === "filters");
+  }
+  function toggleDock(name) { openDock(byId("dock").dataset.pane === name ? null : name); }
+  byId("progressBtn").onclick = () => toggleDock("progress");
+  byId("ppClose").onclick = () => openDock(null);
+
+  function setNav(open) { byId("app").classList.toggle("nav-closed", !open); }
+  byId("navToggle").onclick = () => setNav(byId("app").classList.contains("nav-closed"));
+
+  // El visor se ajusta solo cuando cambian los paneles o la ventana
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { if (viewer) viewer.resize(); }).observe(byId("viewerWrap"));
+  }
+
+  function currentTheme() { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
+  function syncViewerTheme() {
+    if (!viewer) return;
+    try { viewer.setTheme(currentTheme() === "light" ? "light-theme" : "dark-theme"); } catch (e) {}
+  }
+  function applyTheme(t, save) {
+    document.documentElement.setAttribute("data-theme", t);
+    if (save) store.set("ui_theme", t);
+    byId("themeBtn").innerHTML = ico(t === "dark" ? "sun" : "moon");
+    syncViewerTheme();
+  }
+  byId("themeBtn").onclick = () => applyTheme(currentTheme() === "dark" ? "light" : "dark", true);
+
+  let statusTimer = null;
+  function showStatus(msg, isErr, busy) {
+    const s = byId("status");
+    s.className = isErr ? "err" : busy ? "busy" : "";
+    s.innerHTML = ico(isErr ? "alert" : busy ? "loader" : "check") + "<span></span>" +
+      (isErr ? `<button class="icon-btn x" aria-label="Cerrar aviso">${ico("x")}</button>` : "");
+    s.querySelector("span").textContent = msg;
+    if (isErr) s.querySelector(".x").onclick = () => { s.style.display = "none"; };
+    s.style.display = "flex";
+    clearTimeout(statusTimer);
+    if (!isErr) statusTimer = setTimeout(() => { s.style.display = "none"; }, busy ? 30000 : 4500);
+  }
+
+  // Globo informativo de las barras (data-tip)
+  (function () {
+    const tip = byId("tip");
+    document.addEventListener("mouseover", (e) => {
+      const t = e.target.closest && e.target.closest("[data-tip]");
+      if (!t) { tip.hidden = true; return; }
+      tip.textContent = t.dataset.tip; tip.hidden = false;
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (tip.hidden) return;
+      const w = tip.offsetWidth, h = tip.offsetHeight;
+      tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, e.clientX - w / 2)) + "px";
+      tip.style.top = (e.clientY - h - 12 < 8 ? e.clientY + 16 : e.clientY - h - 12) + "px";
+    });
+  })();
+
+  /* ============================================================
+     SESIÓN Y CONFIGURACIÓN
+     ============================================================ */
+  byId("loginBtn").onclick = login;
+  byId("pasteBtn").onclick = completeFromPaste;
+  byId("pasteInput").addEventListener("keydown", (e) => { if (e.key === "Enter") completeFromPaste(); });
+  byId("pasteInput").addEventListener("paste", () => setTimeout(completeFromPaste, 0));
+  byId("generateBtn").onclick = generate;
+  byId("logoutBtn").onclick = () => {
+    clearToken();
+    currentAccountId = null; currentProjectId = null;
+    selected = null; generated = false; linkInput.value = ""; selNote.style.display = "none";
+    resetFilters();
+    if (viewer) { viewer.finish(); viewer = null; }
+    byId("forgeViewer").innerHTML = "";
+    byId("placeholder").style.display = "flex";
+    byId("app").classList.remove("has-model");
+    byId("modelName").hidden = true;
+    byId("loginBtn").textContent = "Iniciar sesión con Autodesk";
+    setNav(true);
+    refreshSteps();
+  };
+
+  // Escribir en el campo limpia la selección del árbol y reevalúa el paso 3
+  linkInput.addEventListener("input", () => {
+    if (linkInput.value.trim()) { selected = null; selNote.style.display = "none"; }
+    generated = false;
+    refreshSteps();
+  });
+  linkInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !generateBtn.disabled) generate(); });
+
+  // Construir el árbol al desplegarlo (perezoso)
+  document.querySelector("details.tree-wrap").addEventListener("toggle", function () {
+    if (this.open && !treeBuilt && getToken()) { treeBuilt = true; buildHubs(); }
+  });
+
+  byId("copyCb").onclick = async () => {
+    try { await navigator.clipboard.writeText(REDIRECT_URI); showStatus("Callback URL copiada."); }
+    catch (e) {
+      const r = document.createRange(); r.selectNodeContents(byId("redirectUriLabel"));
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      showStatus("Selecciona y copia la dirección (Ctrl/Cmd + C).");
+    }
+  };
+  byId("cfgSave").onclick = () => {
+    const clientId = byId("cfgClient").value.trim() || DEFAULTS.clientId;
+    const region = byId("cfgRegion").value === "EMEA" ? "EMEA" : "US";
+    store.set("aps_settings", JSON.stringify({ clientId, region }));
+    if (clientId !== CLIENT_ID) clearToken();      // otra app de APS: la sesión anterior no sirve
+    location.reload();
+  };
+  byId("cfgReset").onclick = () => {
+    store.del("aps_settings");
+    if (CLIENT_ID !== DEFAULTS.clientId) clearToken();
+    location.reload();
+  };
+
+  /* ============================================================
+     ARRANQUE
+     ============================================================ */
+  (async function main() {
+    applyTheme(currentTheme(), false);
+    byId("redirectUriLabel").textContent = REDIRECT_URI;
+    byId("cfgClient").value = CLIENT_ID;
+    byId("cfgRegion").value = SETTINGS.region === "EMEA" ? "EMEA" : "US";
+
+    // Secuencia de estados (misma paleta que colorea el modelo)
+    byId("stageFlow").innerHTML = `<span class="lbl">Etapas que se colorean en el modelo</span>` +
+      STATUS_ORDER.map((s) => `<span class="stage"><i style="background:${rgbCss(STATUS_COLORS[s])}"></i>${s}</span>`)
+        .join(ico("arrow"));
+
+    // Texto de ayuda según cómo se abrió la app
+    const note = byId("modeNote"), hint = byId("cbHint");
+    if (FILE_MODE) {
+      note.innerHTML = "<b>Modo sin servidor.</b> Abriste el archivo directamente: el inicio de sesión se abre en otra pestaña y se completa pegando aquí la dirección final.";
+      note.hidden = false;
+      hint.textContent = "Sin servidor se usa la dirección local ya registrada; no hace falta que nada esté escuchando en ese puerto.";
+    } else if (REDIRECT_URI === LOCAL_CALLBACK) {
+      hint.textContent = "Dirección local, ya registrada en la app de APS.";
+    } else {
+      hint.innerHTML = 'Debe estar añadida tal cual en <a class="link" href="https://aps.autodesk.com/myapps" target="_blank" rel="noopener">aps.autodesk.com/myapps</a> → tu app → Callback URL. Se hace una sola vez por dirección.';
+      if (!store.get("aps_login_ok") && !getToken()) {
+        note.innerHTML = "<b>¿Primera vez en esta dirección?</b> Si Autodesk muestra un error de <i>redirect URI</i>, registra la Callback URL que aparece en «Configuración de la conexión».";
+        note.hidden = false;
+      }
+    }
+
+    await handleRedirect();   // procesa ?code= al volver del login
+    refreshSteps();
+    scheduleRefresh();
+  })();
+  </script>
+</body>
+</html>
