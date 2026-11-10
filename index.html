@@ -568,7 +568,7 @@
                   <ol>
                     <li>Inicia sesión en la pestaña de Autodesk que se abrió.
                         <a class="link" id="pasteOpen" href="#" target="_blank" rel="noopener">Abrirla de nuevo</a></li>
-                    <li>Al terminar verás «No se puede acceder a este sitio». Es lo esperado.</li>
+                    <li>Al terminar verás «No se puede acceder a este sitio» (o esta misma app, si el servidor local está encendido). Es lo esperado.</li>
                     <li>Copia la dirección completa de esa pestaña y pégala aquí.</li>
                   </ol>
                   <input id="pasteInput" class="input mono" type="text" autocomplete="off" spellcheck="false"
@@ -897,29 +897,39 @@
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
   }
 
-  async function login() {
+  // Dos caminos de inicio de sesión:
+  //  · directo  — Autodesk devuelve a esta misma página (requiere que su dirección
+  //               esté registrada como Callback URL en la app de APS);
+  //  · asistido — usa la Callback URL local ya registrada: el login se abre en otra
+  //               pestaña y el usuario pega aquí la dirección final. Funciona desde
+  //               cualquier dirección y con doble clic, sin registrar nada.
+  let assistedActive = false;
+  async function login(assisted) {
     if (!window.crypto || !crypto.subtle) {
       showStatus("Esta dirección no es segura (http). Publica la app en una dirección https o ábrela con doble clic.", true);
       return;
     }
-    // Sin servidor: la pestaña se abre en el mismo clic (evita el bloqueo de ventanas emergentes).
+    const useLocal = FILE_MODE || assisted === true;
+    const redirect = useLocal ? LOCAL_CALLBACK : REDIRECT_URI;
+    // Asistido: la pestaña se abre en el mismo clic (evita el bloqueo de ventanas emergentes).
     let tab = null;
-    if (FILE_MODE) { try { tab = window.open("about:blank", "_blank"); } catch (e) {} }
+    if (useLocal) { try { tab = window.open("about:blank", "_blank"); } catch (e) {} }
 
     const verifier = randomString(64);
     const challenge = base64url(await sha256(verifier));
     const state = randomString(16);
-    pkceMem = { verifier, state };
+    pkceMem = { verifier, state, redirect };
     store.set(PKCE_KEY, JSON.stringify(pkceMem));
     const params = new URLSearchParams({
-      response_type: "code", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
+      response_type: "code", client_id: CLIENT_ID, redirect_uri: redirect,
       scope: SCOPES, state, nonce: randomString(16),
       code_challenge: challenge, code_challenge_method: "S256"
     });
     const authUrl = AUTH_URL + "?" + params.toString();
 
-    if (!FILE_MODE) { window.location.href = authUrl; return; }
+    if (!useLocal) { window.location.href = authUrl; return; }
 
+    assistedActive = true;
     if (tab) { try { tab.opener = null; } catch (e) {} tab.location.href = authUrl; }
     byId("pasteOpen").href = authUrl;
     byId("pasteBox").hidden = false;
@@ -937,7 +947,7 @@
     if (!p || state !== p.state) throw new Error("El inicio de sesión no coincide con este intento. Pulsa de nuevo «Iniciar sesión».");
     const body = new URLSearchParams({
       grant_type: "authorization_code", client_id: CLIENT_ID, code,
-      redirect_uri: REDIRECT_URI, code_verifier: p.verifier
+      redirect_uri: p.redirect || REDIRECT_URI, code_verifier: p.verifier
     });
     let res;
     try {
@@ -966,11 +976,27 @@
     const err = url.searchParams.get("error");
     if (err) { showStatus("Error de inicio de sesión: " + (url.searchParams.get("error_description") || err), true); cleanUrl(); return; }
     if (!code) return;
-    try { await exchangeCode(code, state); showStatus("Conectado con Autodesk."); }
+    let p = null;
+    try { p = JSON.parse(store.get(PKCE_KEY) || "null"); } catch (e) {}
+    if (!p || p.state !== state) {
+      // El login se empezó en otra ventana (enlace publicado o archivo local) con el
+      // método asistido, y aquí hay un servidor local. Se conserva la dirección para copiarla.
+      const note = byId("modeNote");
+      note.innerHTML = '<b>Este inicio de sesión se empezó en otra ventana.</b> Copia la dirección de esta pestaña y pégala allí para terminar.' +
+        '<button class="btn ghost sm block" id="copyRet" style="margin-top:9px">Copiar la dirección</button>';
+      note.hidden = false;
+      byId("copyRet").onclick = () => copyText(window.location.href, "Dirección copiada. Pégala en la ventana donde empezaste.");
+      return;
+    }
+    try { await exchangeCode(code, state); store.set("aps_direct_ok", "1"); showStatus("Conectado con Autodesk."); }
     catch (e) { showStatus(e.message, true); }
     cleanUrl();
   }
   function cleanUrl() { history.replaceState({}, document.title, REDIRECT_URI); }
+  async function copyText(text, okMsg) {
+    try { await navigator.clipboard.writeText(text); showStatus(okMsg); }
+    catch (e) { showStatus("No se pudo copiar automáticamente. Copia la dirección de la barra del navegador.", true); }
+  }
 
   // Vuelta del login sin servidor: el usuario pega la dirección de retorno.
   async function completeFromPaste() {
@@ -2594,7 +2620,7 @@
   /* ============================================================
      SESIÓN Y CONFIGURACIÓN
      ============================================================ */
-  byId("loginBtn").onclick = login;
+  byId("loginBtn").onclick = () => login(assistedActive);
   byId("pasteBtn").onclick = completeFromPaste;
   byId("pasteInput").addEventListener("keydown", (e) => { if (e.key === "Enter") completeFromPaste(); });
   byId("pasteInput").addEventListener("paste", () => setTimeout(completeFromPaste, 0));
@@ -2610,6 +2636,8 @@
     byId("app").classList.remove("has-model");
     byId("modelName").hidden = true;
     byId("loginBtn").textContent = "Iniciar sesión con Autodesk";
+    assistedActive = false;
+    byId("pasteBox").hidden = true;
     setNav(true);
     refreshSteps();
   };
@@ -2672,9 +2700,12 @@
       hint.textContent = "Dirección local, ya registrada en la app de APS.";
     } else {
       hint.innerHTML = 'Debe estar añadida tal cual en <a class="link" href="https://aps.autodesk.com/myapps" target="_blank" rel="noopener">aps.autodesk.com/myapps</a> → tu app → Callback URL. Se hace una sola vez por dirección.';
-      if (!store.get("aps_login_ok") && !getToken()) {
-        note.innerHTML = "<b>¿Primera vez en esta dirección?</b> Si Autodesk muestra un error de <i>redirect URI</i>, registra la Callback URL que aparece en «Configuración de la conexión».";
+      if (!store.get("aps_direct_ok")) {
+        // Mientras el login directo no haya funcionado aquí, se ofrece el asistido.
+        note.innerHTML = "<b>¿Autodesk muestra «Request error»?</b> Esta dirección aún no está registrada en la app de APS. " +
+          'Mientras tanto puedes <a class="link" id="altLogin" href="#">entrar con el método alternativo</a> (un paso más: copiar y pegar una dirección).';
         note.hidden = false;
+        byId("altLogin").onclick = (e) => { e.preventDefault(); login(true); };
       }
     }
 
